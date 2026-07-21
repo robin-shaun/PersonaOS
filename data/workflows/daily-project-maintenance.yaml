@@ -1,0 +1,23 @@
+name: daily-project-maintenance
+version: 1.0.0
+description: 读取仓库、生成简报、整理 Issue、检查质量并等待人工确认。
+
+steps:
+  - id: collect_repository
+    uses: tool.github_repository_reader
+    retries: 2
+
+  - id: daily_brief
+    uses: skill.project-daily-brief
+    retries: 1
+
+  - id: issue_triage
+    uses: skill.issue-triage
+    retries: 1
+
+  - id: quality_evaluation
+    uses: evaluation.project-maintenance
+
+  - id: delivery_approval
+    uses: approval.deliver_recommendation
+

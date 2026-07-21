@@ -1,0 +1,31 @@
+name: project-daily-brief
+version: 1.0.0
+description: 根据仓库、开放 Issue 和开放 PR 生成有证据链接的项目工作简报。
+
+inputs:
+  - repository_snapshot
+
+required_tools:
+  - github_repository_reader
+
+steps:
+  - summarize_repository_activity
+  - identify_active_pull_requests
+  - identify_risks_and_blockers
+  - recommend_next_actions
+  - attach_evidence
+
+output_schema:
+  repository: string
+  summary: string
+  health: object
+  highlights: array
+  risks: array
+  recommended_actions: array
+  evidence: array
+
+evaluation:
+  - required_section_coverage
+  - evidence_integrity
+  - actionability
+

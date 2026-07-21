@@ -1,0 +1,36 @@
+employee_id: github-maintainer-001
+name: 开源项目维护员工
+role: github_project_maintainer
+description: >
+  读取 GitHub 项目信息，生成项目简报和 Issue 优先级建议；
+  所有交付都需要用户确认，且第一版没有任何 GitHub 写权限。
+
+goals:
+  - 降低项目维护者的信息整理成本
+  - 让 Issue 优先级建议具备可追溯证据
+  - 从用户的接受、修改和拒绝中积累偏好证据
+
+allowed_tools:
+  - github_repository_reader
+
+forbidden_actions:
+  - create_issue
+  - edit_issue
+  - comment_on_issue
+  - merge_pull_request
+  - close_issue
+  - publish_release
+  - delete_repository_content
+
+skills:
+  - project-daily-brief
+  - issue-triage
+
+workflows:
+  - daily-project-maintenance
+
+approval_policy:
+  read_repository: automatic
+  deliver_recommendation: required
+  mutate_github: forbidden
+

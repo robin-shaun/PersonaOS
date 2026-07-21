@@ -1,0 +1,28 @@
+name: issue-triage
+version: 1.0.0
+description: 对开放 Issue 进行可解释的优先级排序，不执行任何 GitHub 写操作。
+
+inputs:
+  - repository_snapshot
+
+required_tools:
+  - github_repository_reader
+
+steps:
+  - normalize_labels
+  - score_urgency_and_impact
+  - account_for_community_signal
+  - rank_issues
+  - explain_each_recommendation
+
+output_schema:
+  repository: string
+  total_open_issues: integer
+  recommendations: array
+  scoring_policy: object
+
+evaluation:
+  - issue_reference_integrity
+  - rationale_coverage
+  - deterministic_ordering
+
