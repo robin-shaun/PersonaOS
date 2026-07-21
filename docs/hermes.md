@@ -97,14 +97,24 @@ DIGITAL_EMPLOYEE_RUNTIME=hermes
 HERMES_API_URL=http://127.0.0.1:8642
 HERMES_API_KEY=YOUR_API_SERVER_KEY
 HERMES_MODEL=ai-colleague
+# 仅供 start.sh 自动启动本地 gateway 使用
+HERMES_PROFILE=ai-colleague
 HERMES_REQUEST_TIMEOUT_SECONDS=20
 HERMES_POLL_INTERVAL_SECONDS=0.5
 HERMES_MAX_CONTEXT_BYTES=1000000
 ~~~
 
-然后正常启动 API 与 Worker：
+推荐用根目录脚本同时启动 Hermes、API 与 Worker。Hermes 已运行时脚本会复用，
+未运行且 `HERMES_API_URL` 指向本机时会启动 `HERMES_PROFILE`：
 
 ~~~bash
+./start.sh
+~~~
+
+也可以分别手动启动：
+
+~~~bash
+hermes -p ai-colleague gateway
 .venv/bin/python -m apps.api
 .venv/bin/python -m apps.worker.run
 ~~~

@@ -37,18 +37,22 @@ Skill、Workflow、审批或持久化代码。
 需要 Python 3.11 或更高版本。
 
 ~~~bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-cp .env.example .env
-.venv/bin/python -m apps.api
+./start.sh
 ~~~
 
-API 默认监听尚未被本机其他服务使用的 `127.0.0.1:18110`。打开
-http://127.0.0.1:18110/docs 查看交互式 API。
-
-另开一个终端启动持久化 Worker：
+第一次运行会自动创建 `.env` 和 `.venv`、安装运行依赖，然后在同一终端启动
+API 与 Worker。API 默认监听尚未被本机其他服务使用的 `127.0.0.1:18110`。
+打开 http://127.0.0.1:18110/docs 查看交互式 API，按 `Ctrl+C` 会统一停止
+本脚本启动的所有进程。依赖更新后可以强制重新安装：
 
 ~~~bash
+./start.sh --install
+~~~
+
+如需分别观察或管理进程，仍可手动启动：
+
+~~~bash
+.venv/bin/python -m apps.api
 .venv/bin/python -m apps.worker.run
 ~~~
 
@@ -72,9 +76,12 @@ DIGITAL_EMPLOYEE_RUNTIME=hermes
 HERMES_API_URL=http://127.0.0.1:8642
 HERMES_API_KEY=与-Hermes-API_SERVER_KEY-相同的值
 HERMES_MODEL=ai-colleague
+HERMES_PROFILE=ai-colleague
 ~~~
 
-启动 Hermes gateway、API 和 Worker 后检查：
+运行 `./start.sh` 时，如果配置的本地 Hermes gateway 尚未运行，脚本会自动启动
+该 profile；如果 gateway 已运行则直接复用。远端 Hermes 只检查连接，不会尝试
+在本机代为启动。启动后可以检查：
 
 ~~~bash
 curl http://127.0.0.1:18110/api/v1/runtime/status
