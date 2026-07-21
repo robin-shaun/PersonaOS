@@ -21,6 +21,7 @@ from core.storage.models import (
     QueueJobRecord,
     SkillRecord,
     SkillVersionRecord,
+    TaskEventRecord,
     TaskRecord,
     TaskRunRecord,
     ToolCallRecord,
@@ -64,73 +65,75 @@ class ExecutionStore:
         workflows: list[WorkflowDefinition],
     ) -> None:
         with self.database.session() as session:
-            for definition in employees:
-                record = session.get(EmployeeRecord, definition.employee_id)
-                payload = definition.model_dump(mode="json")
-                if record is None:
+            for employee_definition in employees:
+                employee_record = session.get(
+                    EmployeeRecord, employee_definition.employee_id
+                )
+                payload = employee_definition.model_dump(mode="json")
+                if employee_record is None:
                     session.add(
                         EmployeeRecord(
-                            id=definition.employee_id,
-                            name=definition.name,
-                            role=definition.role,
+                            id=employee_definition.employee_id,
+                            name=employee_definition.name,
+                            role=employee_definition.role,
                             definition=payload,
                         )
                     )
                 else:
-                    record.name = definition.name
-                    record.role = definition.role
-                    record.definition = payload
+                    employee_record.name = employee_definition.name
+                    employee_record.role = employee_definition.role
+                    employee_record.definition = payload
 
-            for definition in skills:
-                skill = session.get(SkillRecord, definition.name)
+            for skill_definition in skills:
+                skill = session.get(SkillRecord, skill_definition.name)
                 if skill is None:
                     session.add(
                         SkillRecord(
-                            id=definition.name,
-                            description=definition.description,
+                            id=skill_definition.name,
+                            description=skill_definition.description,
                         )
                     )
                     session.flush()
                 else:
-                    skill.description = definition.description
+                    skill.description = skill_definition.description
                 version = session.scalar(
                     select(SkillVersionRecord).where(
-                        SkillVersionRecord.skill_id == definition.name,
-                        SkillVersionRecord.version == definition.version,
+                        SkillVersionRecord.skill_id == skill_definition.name,
+                        SkillVersionRecord.version == skill_definition.version,
                     )
                 )
-                payload = definition.model_dump(mode="json")
+                payload = skill_definition.model_dump(mode="json")
                 if version is None:
                     session.add(
                         SkillVersionRecord(
                             id=_new_id(),
-                            skill_id=definition.name,
-                            version=definition.version,
+                            skill_id=skill_definition.name,
+                            version=skill_definition.version,
                             definition=payload,
                         )
                     )
                 else:
                     version.definition = payload
 
-            for definition in workflows:
-                record = session.scalar(
+            for workflow_definition in workflows:
+                workflow_record = session.scalar(
                     select(WorkflowRecord).where(
-                        WorkflowRecord.name == definition.name,
-                        WorkflowRecord.version == definition.version,
+                        WorkflowRecord.name == workflow_definition.name,
+                        WorkflowRecord.version == workflow_definition.version,
                     )
                 )
-                payload = definition.model_dump(mode="json")
-                if record is None:
+                payload = workflow_definition.model_dump(mode="json")
+                if workflow_record is None:
                     session.add(
                         WorkflowRecord(
                             id=_new_id(),
-                            name=definition.name,
-                            version=definition.version,
+                            name=workflow_definition.name,
+                            version=workflow_definition.version,
                             definition=payload,
                         )
                     )
                 else:
-                    record.definition = payload
+                    workflow_record.definition = payload
 
     def create_task(
         self,
@@ -277,6 +280,272 @@ class ExecutionStore:
             task = self._required(session, TaskRecord, task_id)
             return _record_dict(task)
 
+    def request_task_cancellation(
+        self,
+        task_id: str,
+        *,
+        requested_by: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        normalized_actor = requested_by.strip() or "api"
+        normalized_reason = reason.strip() or "cancelled by user"
+        with self.database.session() as session:
+            task = self._required(session, TaskRecord, task_id)
+            job = session.scalar(
+                select(QueueJobRecord).where(QueueJobRecord.task_id == task_id)
+            )
+            if job is None:
+                raise ValueError(f"Task {task_id} was not created through the queue")
+
+            if task.status == "cancelled" and job.status == "cancelled":
+                return {
+                    "task_id": task_id,
+                    "queue_job_id": job.id,
+                    "status": "cancelled",
+                    "immediate": True,
+                    "idempotent_replay": True,
+                }
+            if task.status == "cancelling" and job.status == "leased":
+                return {
+                    "task_id": task_id,
+                    "queue_job_id": job.id,
+                    "status": "cancelling",
+                    "immediate": False,
+                    "idempotent_replay": True,
+                }
+            if task.status not in {"pending", "running"}:
+                raise ValueError(
+                    f"Task {task_id} cannot be cancelled from status {task.status}"
+                )
+
+            if job.status == "queued":
+                result = session.execute(
+                    update(QueueJobRecord)
+                    .where(
+                        QueueJobRecord.id == job.id,
+                        QueueJobRecord.status == "queued",
+                    )
+                    .values(
+                        status="cancelled",
+                        lease_owner=None,
+                        lease_expires_at=None,
+                        last_error=normalized_reason,
+                        finished_at=now,
+                        updated_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if result.rowcount == 1:
+                    self._add_task_event(
+                        session,
+                        task_id=task_id,
+                        event_type="cancellation_requested",
+                        actor=normalized_actor,
+                        detail={
+                            "reason": normalized_reason,
+                            "queue_status": "queued",
+                        },
+                        created_at=now,
+                    )
+                    self._finalize_task_cancellation(
+                        session,
+                        job=job,
+                        task=task,
+                        now=utc_now(),
+                        reason=normalized_reason,
+                        actor="queue",
+                    )
+                    return {
+                        "task_id": task_id,
+                        "queue_job_id": job.id,
+                        "status": "cancelled",
+                        "immediate": True,
+                        "idempotent_replay": False,
+                    }
+                session.expire(job)
+                session.refresh(job)
+
+            if job.status == "leased":
+                lease_result = session.execute(
+                    update(QueueJobRecord)
+                    .where(
+                        QueueJobRecord.id == job.id,
+                        QueueJobRecord.status == "leased",
+                    )
+                    .values(updated_at=now)
+                    .execution_options(synchronize_session=False)
+                )
+                if lease_result.rowcount != 1:
+                    session.expire(job)
+                    session.refresh(job)
+                    raise ValueError(
+                        f"Task {task_id} changed while cancellation was requested"
+                    )
+                task_result = session.execute(
+                    update(TaskRecord)
+                    .where(
+                        TaskRecord.id == task_id,
+                        TaskRecord.status.in_(("pending", "running")),
+                    )
+                    .values(status="cancelling", updated_at=now)
+                    .execution_options(synchronize_session=False)
+                )
+                if task_result.rowcount != 1:
+                    session.expire(task)
+                    session.refresh(task)
+                    raise ValueError(
+                        f"Task {task_id} cannot be cancelled from status {task.status}"
+                    )
+                self._add_task_event(
+                    session,
+                    task_id=task_id,
+                    event_type="cancellation_requested",
+                    actor=normalized_actor,
+                    detail={
+                        "reason": normalized_reason,
+                        "queue_status": "leased",
+                        "worker_id": job.lease_owner,
+                    },
+                    created_at=now,
+                )
+                return {
+                    "task_id": task_id,
+                    "queue_job_id": job.id,
+                    "status": "cancelling",
+                    "immediate": False,
+                    "idempotent_replay": False,
+                }
+
+            if job.status == "cancelled":
+                task.status = "cancelled"
+                task.updated_at = now
+                return {
+                    "task_id": task_id,
+                    "queue_job_id": job.id,
+                    "status": "cancelled",
+                    "immediate": True,
+                    "idempotent_replay": True,
+                }
+            raise ValueError(
+                f"Task {task_id} cannot be cancelled while queue job is {job.status}"
+            )
+
+    def is_task_cancellation_requested(self, task_id: str) -> bool:
+        with self.database.session() as session:
+            status = session.scalar(
+                select(TaskRecord.status).where(TaskRecord.id == task_id)
+            )
+            if status is None:
+                raise KeyError(f"TaskRecord not found: {task_id}")
+            return status == "cancelling"
+
+    def complete_task_cancellation(
+        self,
+        queue_job_id: str,
+        *,
+        worker_id: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.session() as session:
+            job = self._required(session, QueueJobRecord, queue_job_id)
+            if job.status == "cancelled":
+                return _record_dict(job)
+            if job.status != "leased" or job.lease_owner != worker_id:
+                raise ValueError(
+                    f"Queue job {queue_job_id} is not leased by {worker_id}"
+                )
+            task = self._required(session, TaskRecord, job.task_id)
+            requested_reason = self._latest_cancellation_reason(session, task.id)
+            if task.status != "cancelling" and requested_reason is None:
+                raise ValueError(f"Task {task.id} has no cancellation request")
+
+            normalized_reason = (reason or requested_reason or "").strip()
+            normalized_reason = normalized_reason or "cancelled by user"
+            self._finalize_task_cancellation(
+                session,
+                job=job,
+                task=task,
+                now=now,
+                reason=normalized_reason,
+                actor=worker_id,
+            )
+            session.flush()
+            return _record_dict(job)
+
+    def timeout_queue_job(
+        self,
+        queue_job_id: str,
+        *,
+        worker_id: str,
+        timeout_seconds: float,
+        retry_delay_seconds: float,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        timeout_seconds = max(0.0, timeout_seconds)
+        reason = f"task execution exceeded {timeout_seconds:g} seconds"
+        with self.database.session() as session:
+            job = self._required(session, QueueJobRecord, queue_job_id)
+            if job.status != "leased" or job.lease_owner != worker_id:
+                raise ValueError(
+                    f"Queue job {queue_job_id} is not leased by {worker_id}"
+                )
+            task = self._required(session, TaskRecord, job.task_id)
+            if task.status == "cancelling":
+                self._finalize_task_cancellation(
+                    session,
+                    job=job,
+                    task=task,
+                    now=now,
+                    reason=(
+                        self._latest_cancellation_reason(session, task.id)
+                        or "cancelled by user"
+                    ),
+                    actor=worker_id,
+                )
+                session.flush()
+                return _record_dict(job)
+            self._mark_active_execution_stopped(
+                session,
+                task,
+                now=now,
+                reason=reason,
+                status="timed_out",
+            )
+
+            retry_scheduled = job.attempts < job.max_attempts
+            job.last_error = reason
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.updated_at = now
+            if retry_scheduled:
+                job.status = "queued"
+                job.available_at = now + timedelta(
+                    seconds=max(0.0, retry_delay_seconds)
+                )
+                task.status = "pending"
+            else:
+                job.status = "failed"
+                job.finished_at = now
+                task.status = "failed"
+            task.updated_at = now
+            self._add_task_event(
+                session,
+                task_id=task.id,
+                event_type="execution_timed_out",
+                actor=worker_id,
+                detail={
+                    "timeout_seconds": timeout_seconds,
+                    "attempt": job.attempts,
+                    "max_attempts": job.max_attempts,
+                    "retry_scheduled": retry_scheduled,
+                },
+                created_at=now,
+            )
+            session.flush()
+            return _record_dict(job)
+
     def claim_next_queue_job(
         self,
         *,
@@ -315,6 +584,36 @@ class ExecutionStore:
 
                 task = self._required(session, TaskRecord, job.task_id)
                 recovered = job.status == "leased"
+                if recovered and task.status in {"cancelling", "cancelled"}:
+                    cancellation_result = session.execute(
+                        update(QueueJobRecord)
+                        .where(
+                            QueueJobRecord.id == job.id,
+                            QueueJobRecord.status == "leased",
+                            QueueJobRecord.lease_expires_at <= now,
+                        )
+                        .values(
+                            status="cancelled",
+                            lease_owner=None,
+                            lease_expires_at=None,
+                            finished_at=now,
+                            updated_at=now,
+                        )
+                        .execution_options(synchronize_session=False)
+                    )
+                    if cancellation_result.rowcount != 1:
+                        continue
+                    session.expire(job)
+                    session.refresh(job)
+                    self._finalize_task_cancellation(
+                        session,
+                        job=job,
+                        task=task,
+                        now=now,
+                        reason="cancelled after worker lease expired",
+                        actor=worker_id,
+                    )
+                    continue
                 if recovered and task.status in {
                     "awaiting_approval",
                     "completed",
@@ -418,6 +717,21 @@ class ExecutionStore:
                 raise ValueError(
                     f"Queue job {queue_job_id} is not leased by {worker_id}"
                 )
+            task = self._required(session, TaskRecord, job.task_id)
+            if task.status == "cancelling":
+                self._finalize_task_cancellation(
+                    session,
+                    job=job,
+                    task=task,
+                    now=now,
+                    reason=(
+                        self._latest_cancellation_reason(session, task.id)
+                        or "cancelled by user"
+                    ),
+                    actor=worker_id,
+                )
+                session.flush()
+                return _record_dict(job)
             job.status = "completed"
             job.lease_owner = None
             job.lease_expires_at = None
@@ -442,6 +756,20 @@ class ExecutionStore:
                     f"Queue job {queue_job_id} is not leased by {worker_id}"
                 )
             task = self._required(session, TaskRecord, job.task_id)
+            if task.status == "cancelling":
+                self._finalize_task_cancellation(
+                    session,
+                    job=job,
+                    task=task,
+                    now=now,
+                    reason=(
+                        self._latest_cancellation_reason(session, task.id)
+                        or "cancelled by user"
+                    ),
+                    actor=worker_id,
+                )
+                session.flush()
+                return _record_dict(job)
             job.last_error = error
             job.lease_owner = None
             job.lease_expires_at = None
@@ -484,7 +812,13 @@ class ExecutionStore:
     def mark_task_failed(self, task_id: str, *, error: str) -> None:
         with self.database.session() as session:
             task = self._required(session, TaskRecord, task_id)
-            if task.status not in {"awaiting_approval", "completed", "rejected"}:
+            if task.status not in {
+                "cancelling",
+                "cancelled",
+                "awaiting_approval",
+                "completed",
+                "rejected",
+            }:
                 task.status = "failed"
                 task.updated_at = utc_now()
 
@@ -494,6 +828,7 @@ class ExecutionStore:
             "leased": 0,
             "completed": 0,
             "failed": 0,
+            "cancelled": 0,
         }
         with self.database.session() as session:
             rows = session.execute(
@@ -578,6 +913,149 @@ class ExecutionStore:
                 workflow_run.updated_at = now
         task.status = "pending"
         task.updated_at = now
+
+    @staticmethod
+    def _mark_active_execution_stopped(
+        session: Session,
+        task: TaskRecord,
+        *,
+        now: datetime,
+        reason: str,
+        status: str,
+    ) -> None:
+        active_runs = list(
+            session.scalars(
+                select(TaskRunRecord).where(
+                    TaskRunRecord.task_id == task.id,
+                    TaskRunRecord.status.in_(("running", "awaiting_approval")),
+                )
+            )
+        )
+        run_ids = [run.id for run in active_runs]
+        for run in active_runs:
+            run.status = status
+            run.error = reason
+            run.finished_at = now
+            run.latency_ms = _elapsed_ms(run.started_at, now)
+        if not run_ids:
+            return
+        workflow_runs = session.scalars(
+            select(WorkflowRunRecord).where(
+                WorkflowRunRecord.task_run_id.in_(run_ids),
+                WorkflowRunRecord.status.in_(("running", "awaiting_approval")),
+            )
+        )
+        for workflow_run in workflow_runs:
+            workflow_run.status = status
+            history = list(workflow_run.history or [])
+            history.append(
+                {
+                    "step_id": workflow_run.current_step,
+                    "status": status,
+                    "finished_at": now.isoformat(),
+                    "error": reason,
+                }
+            )
+            workflow_run.history = history
+            workflow_run.current_step = None
+            workflow_run.updated_at = now
+
+    @staticmethod
+    def _add_task_event(
+        session: Session,
+        *,
+        task_id: str,
+        event_type: str,
+        actor: str,
+        detail: dict[str, Any],
+        created_at: datetime,
+    ) -> None:
+        session.add(
+            TaskEventRecord(
+                id=_new_id(),
+                task_id=task_id,
+                event_type=event_type,
+                actor=actor,
+                detail=detail,
+                created_at=created_at,
+            )
+        )
+
+    @staticmethod
+    def _latest_cancellation_reason(
+        session: Session,
+        task_id: str,
+    ) -> str | None:
+        event = session.scalar(
+            select(TaskEventRecord)
+            .where(
+                TaskEventRecord.task_id == task_id,
+                TaskEventRecord.event_type == "cancellation_requested",
+            )
+            .order_by(TaskEventRecord.created_at.desc())
+            .limit(1)
+        )
+        if event is None:
+            return None
+        reason = str((event.detail or {}).get("reason", "")).strip()
+        return reason or None
+
+    @staticmethod
+    def _finalize_task_cancellation(
+        session: Session,
+        *,
+        job: QueueJobRecord,
+        task: TaskRecord,
+        now: datetime,
+        reason: str,
+        actor: str,
+    ) -> None:
+        execution_started = bool(
+            session.scalar(
+                select(func.count(TaskRunRecord.id)).where(
+                    TaskRunRecord.task_id == task.id
+                )
+            )
+        )
+        ExecutionStore._mark_active_execution_stopped(
+            session,
+            task,
+            now=now,
+            reason=reason,
+            status="cancelled",
+        )
+        pending_approvals = session.scalars(
+            select(ApprovalRecord).where(
+                ApprovalRecord.task_id == task.id,
+                ApprovalRecord.status == "pending",
+            )
+        )
+        for approval in pending_approvals:
+            approval.status = "cancelled"
+            approval.reason = reason
+            approval.decided_at = now
+
+        task.status = "cancelled"
+        task.final_output = None
+        task.updated_at = now
+        job.status = "cancelled"
+        job.lease_owner = None
+        job.lease_expires_at = None
+        job.last_error = reason
+        job.finished_at = now
+        job.updated_at = now
+        ExecutionStore._add_task_event(
+            session,
+            task_id=task.id,
+            event_type="cancellation_completed",
+            actor=actor,
+            detail={
+                "reason": reason,
+                "execution_started": execution_started,
+                "attempt": job.attempts,
+            },
+            created_at=now,
+        )
 
     def start_task_run(
         self,
@@ -723,13 +1201,16 @@ class ExecutionStore:
         task_id: str,
         task_run_id: str,
         output: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         with self.database.session() as session:
             task = self._required(session, TaskRecord, task_id)
             run = self._required(session, TaskRunRecord, task_run_id)
+            if task.status == "cancelling":
+                return False
             task.status = "awaiting_approval"
             run.status = "awaiting_approval"
             run.output = output
+            return True
 
     def mark_execution_failed(
         self,
@@ -738,7 +1219,7 @@ class ExecutionStore:
         task_run_id: str,
         workflow_run_id: str,
         error: str,
-    ) -> None:
+    ) -> bool:
         finished_at = utc_now()
         with self.database.session() as session:
             task = self._required(session, TaskRecord, task_id)
@@ -746,6 +1227,8 @@ class ExecutionStore:
             workflow_run = self._required(
                 session, WorkflowRunRecord, workflow_run_id
             )
+            if task.status == "cancelling":
+                return False
             task.status = "failed"
             run.status = "failed"
             run.error = error
@@ -753,6 +1236,7 @@ class ExecutionStore:
             run.latency_ms = _elapsed_ms(run.started_at, finished_at)
             workflow_run.status = "failed"
             workflow_run.updated_at = finished_at
+            return True
 
     def resolve_approval(
         self,
@@ -954,6 +1438,13 @@ class ExecutionStore:
                     .order_by(QueueJobRecord.created_at)
                 )
             )
+            task_events = list(
+                session.scalars(
+                    select(TaskEventRecord)
+                    .where(TaskEventRecord.task_id == task_id)
+                    .order_by(TaskEventRecord.created_at, TaskEventRecord.id)
+                )
+            )
             return {
                 "task": _record_dict(task),
                 "runs": [_record_dict(item) for item in runs],
@@ -964,6 +1455,7 @@ class ExecutionStore:
                 "artifacts": [_record_dict(item) for item in artifacts],
                 "decision_records": [_record_dict(item) for item in decisions],
                 "queue_jobs": [_record_dict(item) for item in queue_jobs],
+                "task_events": [_record_dict(item) for item in task_events],
             }
 
     def list_tasks(self, *, limit: int = 50) -> list[dict[str, Any]]:

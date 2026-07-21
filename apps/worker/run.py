@@ -39,6 +39,16 @@ def parse_args(settings: Settings) -> argparse.Namespace:
         type=float,
         default=settings.worker_retry_delay_seconds,
     )
+    parser.add_argument(
+        "--task-timeout",
+        type=float,
+        default=settings.worker_task_timeout_seconds,
+    )
+    parser.add_argument(
+        "--control-poll",
+        type=float,
+        default=settings.worker_control_poll_seconds,
+    )
     parser.add_argument("--worker-id", default=_default_worker_id())
     return parser.parse_args()
 
@@ -58,6 +68,8 @@ async def run() -> None:
         worker_id=args.worker_id,
         lease_seconds=args.lease_seconds,
         retry_delay_seconds=args.retry_delay,
+        task_timeout_seconds=args.task_timeout,
+        control_poll_interval_seconds=args.control_poll,
     )
     if args.once:
         result = await worker.run_one()

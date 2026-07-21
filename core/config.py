@@ -21,6 +21,8 @@ class Settings:
     worker_poll_interval_seconds: float = 1.0
     worker_lease_seconds: int = 300
     worker_retry_delay_seconds: float = 5.0
+    worker_task_timeout_seconds: float = 300.0
+    worker_control_poll_seconds: float = 0.25
 
     @classmethod
     def from_env(cls, base_dir: Path | None = None) -> "Settings":
@@ -64,6 +66,16 @@ class Settings:
                 "DIGITAL_EMPLOYEE_WORKER_RETRY_DELAY_SECONDS",
                 default=5.0,
                 minimum=0.0,
+            ),
+            worker_task_timeout_seconds=_env_float(
+                "DIGITAL_EMPLOYEE_WORKER_TASK_TIMEOUT_SECONDS",
+                default=300.0,
+                minimum=0.05,
+            ),
+            worker_control_poll_seconds=_env_float(
+                "DIGITAL_EMPLOYEE_WORKER_CONTROL_POLL_SECONDS",
+                default=0.25,
+                minimum=0.01,
             ),
         )
 

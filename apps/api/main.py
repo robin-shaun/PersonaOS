@@ -9,6 +9,7 @@ from apps.api.schemas import (
     ApprovalDecisionRequest,
     FeedbackCreate,
     ProjectMaintenanceTaskCreate,
+    TaskCancellationRequest,
 )
 from core.bootstrap import Container, build_container
 from core.services.project_maintenance import (
@@ -22,7 +23,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="Digital Employee MVP",
-        version="0.2.0",
+        version="0.3.0",
         description=(
             "Approval-first, read-only GitHub project maintenance employee. "
             "Every result includes evidence and an execution trace."
@@ -51,6 +52,7 @@ def create_app(container: Container | None = None) -> FastAPI:
             "runtime": container.settings.runtime_name,
             "github_mode": "read_only",
             "api_port": container.settings.api_port,
+            "task_timeout_seconds": container.settings.worker_task_timeout_seconds,
             "queue": container.store.queue_summary(),
         }
 
@@ -116,6 +118,34 @@ def create_app(container: Container | None = None) -> FastAPI:
                 "requeued": True,
                 "queue_job_id": queue_job["id"],
             }
+            return bundle
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/tasks/{task_id}/cancel",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def cancel_task(
+        task_id: str,
+        payload: TaskCancellationRequest,
+    ) -> dict[str, Any]:
+        try:
+            cancellation = container.store.request_task_cancellation(
+                task_id,
+                requested_by=payload.requested_by,
+                reason=payload.reason,
+            )
+            bundle = container.store.get_task_bundle(task_id)
+            bundle["cancellation"] = cancellation
             return bundle
         except KeyError as exc:
             raise HTTPException(

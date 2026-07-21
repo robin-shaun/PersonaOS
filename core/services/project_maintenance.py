@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -36,6 +37,12 @@ class TaskExecutionFailed(RuntimeError):
 
 class TaskConflictError(RuntimeError):
     pass
+
+
+class TaskCancellationRequested(RuntimeError):
+    def __init__(self, task_id: str) -> None:
+        super().__init__(f"Task {task_id} cancellation was requested")
+        self.task_id = task_id
 
 
 class ProjectMaintenanceService:
@@ -109,6 +116,8 @@ class ProjectMaintenanceService:
 
     async def run_task(self, task_id: str) -> dict[str, Any]:
         task = self._store.get_task_for_execution(task_id)
+        if task["status"] == "cancelling":
+            raise TaskCancellationRequested(task_id)
         task_input = task["input"]
         command = ProjectMaintenanceCommand(
             repository=task_input["repository"],
@@ -223,19 +232,29 @@ class ProjectMaintenanceService:
                     "MVP workflow must pause at the delivery approval gate"
                 )
             proposed_output = result.state["delivery_approval"]["proposed_output"]
-            self._store.mark_execution_waiting(
+            waiting_recorded = self._store.mark_execution_waiting(
                 task_id=task_id,
                 task_run_id=task_run_id,
                 output=proposed_output,
             )
+            if not waiting_recorded:
+                raise TaskCancellationRequested(task_id)
             return self._store.get_task_bundle(task_id)
+        except TaskCancellationRequested:
+            raise
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            self._store.mark_execution_failed(
+            if self._store.is_task_cancellation_requested(task_id):
+                raise TaskCancellationRequested(task_id) from exc
+            failure_recorded = self._store.mark_execution_failed(
                 task_id=task_id,
                 task_run_id=task_run_id,
                 workflow_run_id=workflow_run_id,
                 error=str(exc),
             )
+            if not failure_recorded:
+                raise TaskCancellationRequested(task_id) from exc
             cause = exc.cause if isinstance(exc, WorkflowExecutionError) else exc
             raise TaskExecutionFailed(task_id, cause) from exc
 

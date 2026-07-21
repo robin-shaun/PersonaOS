@@ -159,6 +159,19 @@ class QueueJobRecord(Base):
     )
 
 
+class TaskEventRecord(Base):
+    __tablename__ = "task_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    actor: Mapped[str] = mapped_column(String(200))
+    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
 class TaskRunRecord(Base):
     __tablename__ = "task_runs"
 

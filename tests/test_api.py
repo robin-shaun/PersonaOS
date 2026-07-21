@@ -20,6 +20,7 @@ async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
         assert health.status_code == 200
         assert health.json()["github_mode"] == "read_only"
         assert health.json()["api_port"] == 18110
+        assert health.json()["task_timeout_seconds"] == 300.0
 
         response = await client.post(
             "/api/v1/tasks/project-maintenance",
@@ -81,3 +82,43 @@ async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
         trace = await client.get(f"/api/v1/tasks/{task['task']['id']}")
         assert trace.status_code == 200
         assert len(trace.json()["decision_records"]) == 1
+
+        cannot_cancel = await client.post(
+            f"/api/v1/tasks/{task['task']['id']}/cancel",
+            json={"reason": "已经交付的任务不能取消"},
+        )
+        assert cannot_cancel.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_api_cancels_a_queued_task(container: Container) -> None:
+    app = create_app(container)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+    ) as client:
+        submitted = await client.post(
+            "/api/v1/tasks/project-maintenance",
+            headers={"Idempotency-Key": "api-cancel-task"},
+            json={"repository": "example/project"},
+        )
+        task_id = submitted.json()["task"]["id"]
+
+        cancelled = await client.post(
+            f"/api/v1/tasks/{task_id}/cancel",
+            json={
+                "reason": "API 用户取消",
+                "requested_by": "shaun",
+            },
+        )
+
+        assert cancelled.status_code == 202
+        payload = cancelled.json()
+        assert payload["task"]["status"] == "cancelled"
+        assert payload["queue_jobs"][0]["status"] == "cancelled"
+        assert payload["cancellation"]["immediate"] is True
+        assert payload["task_events"][0]["actor"] == "shaun"
+
+        health = await client.get("/health")
+        assert health.json()["queue"]["cancelled"] == 1

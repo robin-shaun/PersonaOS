@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,7 +29,7 @@ class Database:
         )
 
     @staticmethod
-    def _enable_sqlite_foreign_keys(dbapi_connection: object, _: object) -> None:
+    def _enable_sqlite_foreign_keys(dbapi_connection: Any, _: object) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
@@ -47,4 +48,3 @@ class Database:
             raise
         finally:
             session.close()
-

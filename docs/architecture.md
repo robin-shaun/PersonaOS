@@ -33,7 +33,8 @@ adapter 中转换为稳定领域模型。
 ## 持久化队列
 
 API 只负责校验并创建 `pending` 任务，不在 HTTP 请求内访问 GitHub。每个任务
-对应一个 queue_job，状态为 `queued`、`leased`、`completed` 或 `failed`。
+对应一个 queue_job，状态为 `queued`、`leased`、`completed`、`failed`
+或 `cancelled`。
 Worker 原子领取作业后定期续租；进程在完成前退出时，租约到期的作业可以由
 其他 Worker 回收，旧的运行轨迹会标记为失败并保留。
 
@@ -41,16 +42,34 @@ Worker 原子领取作业后定期续租；进程在完成前退出时，租约�
 原任务；相同键配不同输入会返回冲突。Worker 自动重试耗尽后，任务保持
 `failed`，用户可通过重试 API 将尝试次数清零并重新入队。
 
+## 取消与超时
+
+取消接口只接受 `pending` 或 `running` 任务。仍在队列中的任务会原子更新为
+`cancelled`，不会再被 Worker 领取；已经领取的任务先进入 `cancelling`，
+Worker 的控制轮询会取消当前 asyncio Task，再把 task、queue_job、task_run
+和 workflow_run 一起收敛为 `cancelled`。如果 Worker 在取消期间崩溃，
+租约回收者负责完成取消，不会把任务重新执行。
+
+每次 Worker 执行都有独立硬超时。超时会把当前 task_run 与 workflow_run
+标记为 `timed_out`，随后遵循队列原有的最大尝试次数和重试延迟；耗尽尝试后
+任务进入 `failed`。取消请求、取消完成和超时均写入 task_events，保留操作者、
+原因、尝试次数和是否继续重试。
+
 ## Workflow 状态
 
 | 状态 | 含义 |
 | --- | --- |
 | pending | 已创建，尚未执行 |
 | running | 正在读取、分析或检查 |
+| cancelling | 已请求取消，等待 Worker 停止当前执行 |
+| cancelled | 已取消，不再执行或交付 |
 | awaiting_approval | 已生成建议，等待用户决定 |
 | completed | 用户接受原稿或修改稿 |
 | rejected | 用户拒绝交付 |
 | failed | 工具、Skill 或质量门禁失败 |
+
+task_run 和 workflow_run 还可以进入 `timed_out`，用于区分业务失败与执行时限
+耗尽。任务本身在仍有重试机会时回到 `pending`，耗尽后进入 `failed`。
 
 Workflow 每一步都会把当前 state 和 history 写入 workflow_runs。工具错误会
 同时进入 tool_calls；超过重试次数后任务进入 failed，API 返回 task_id，用户
@@ -90,9 +109,8 @@ Schema 校验，并保留当前确定性 evaluator 作为交付门禁。
 
 ## 下一批技术任务
 
-1. 增加运行中任务的超时与主动取消；
-2. 使用 GitHub App 安装令牌替代长期个人 Token；
-3. 增加 PostgreSQL、数据库迁移和租户隔离；
-4. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
-5. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
-6. 提供候选偏好的查看、确认、撤销、冲突和过期机制。
+1. 使用 GitHub App 安装令牌替代长期个人 Token；
+2. 增加 PostgreSQL、数据库迁移和租户隔离；
+3. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
+4. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
+5. 提供候选偏好的查看、确认、撤销、冲突和过期机制。

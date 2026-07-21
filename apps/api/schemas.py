@@ -49,3 +49,11 @@ class FeedbackCreate(BaseModel):
     comment: str = Field(min_length=1, max_length=4000)
     rating: int | None = Field(default=None, ge=1, le=5)
 
+
+class TaskCancellationRequest(BaseModel):
+    reason: str = Field(
+        default="cancelled by user",
+        min_length=1,
+        max_length=2000,
+    )
+    requested_by: str = Field(default="api", min_length=1, max_length=200)
