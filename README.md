@@ -7,6 +7,13 @@
 所有建议在交付前都会暂停，等待用户接受、修改或拒绝；这些选择会被
 保存为以后构建个人偏好和数字分身的数据证据。
 
+## 产品形态
+
+产品采用网页端优先：浏览器负责连接仓库、发起任务、查看轨迹和处理审批；API、
+Worker 与 Hermes 都运行在服务端，模型密钥不会下发到浏览器。当前仓库已完成
+后端 API 和 Worker，现阶段可通过 `/docs` 操作；专用管理网页是下一阶段界面。
+以后如需桌面客户端，可以在同一 API 上增加桌面壳，不需要改变 Agent 底座。
+
 ## 已实现的闭环
 
     GitHub 只读快照
@@ -21,10 +28,9 @@
           ↓
     产物、修改、反馈与决策记录
 
-当前 0.4.0 版本使用确定性的 rules-v1 运行时，因此无需模型密钥即可运行和测试。
-业务层只依赖 AgentRuntime 接口，Hermes 适配边界位于
-adapters/hermes/runtime.py，后续替换运行时不需要重写 Skill、Workflow、
-审批或持久化代码。
+当前 0.5.0 版本已集成 Hermes Agent API Server，也保留确定性的 `rules-v1`
+作为默认离线运行时。业务层只依赖 `AgentRuntime`，切换 Hermes 不需要重写
+Skill、Workflow、审批或持久化代码。
 
 ## 快速启动
 
@@ -54,6 +60,30 @@ Worker 默认给每次执行 300 秒硬超时，并每 0.25 秒检查一次主�
 访问公共仓库时可以不设置 `GITHUB_TOKEN`，但匿名 GitHub API 的请求额度较低。
 `GITHUB_TOKEN` 仅保留为本地兼容入口；连接私有仓库推荐使用 GitHub App。
 应用只实现 GET 请求，不包含修改 Issue、PR 或仓库的工具。
+
+## 启用 Hermes Agent
+
+Hermes 以独立 API Server 进程接入，本项目不把 Hermes 安装包或内部对象耦合到
+业务代码。请先按 [Hermes 配置指南](docs/hermes.md) 创建专用、无工具的
+`ai-colleague` profile，然后在本项目 `.env` 中设置：
+
+~~~bash
+DIGITAL_EMPLOYEE_RUNTIME=hermes
+HERMES_API_URL=http://127.0.0.1:8642
+HERMES_API_KEY=与-Hermes-API_SERVER_KEY-相同的值
+HERMES_MODEL=ai-colleague
+~~~
+
+启动 Hermes gateway、API 和 Worker 后检查：
+
+~~~bash
+curl http://127.0.0.1:18110/api/v1/runtime/status
+~~~
+
+服务会先检查 Hermes 的 Runs API 能力和 API Server toolsets。只要远端暴露任何
+已启用工具，就会在提交模型任务前失败；这一检查不能通过环境变量关闭。Hermes
+只分析主服务已经读取的结构化仓库快照，GitHub 访问、权限检查和审批仍由本项目
+控制。Worker 取消或超时也会请求 Hermes `/v1/runs/{run_id}/stop`。
 
 ## 连接 GitHub App
 
@@ -180,6 +210,7 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | /health | 运行状态、安全模式与队列计数 |
+| GET | /api/v1/runtime/status | 检查当前 Agent 运行时及 Hermes 工具边界 |
 | GET | /api/v1/employees | 查看岗位定义 |
 | GET | /api/v1/skills | 查看已注册 Skill |
 | POST | /api/v1/github/connections | 验证并保存 GitHub App 仓库连接 |
@@ -212,7 +243,7 @@ workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
     adapters/
       github/              GitHub App 鉴权与只读 REST 适配器
       runtime/             可离线验证的规则运行时
-      hermes/              Hermes 隔离接口
+      hermes/              Hermes Runs API 客户端与隔离接口
     data/
       employee_templates/  岗位配置
       skills/              Skill 定义与版本
@@ -227,7 +258,8 @@ workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
 .venv/bin/pytest -q
 ~~~
 
-测试全部使用内存数据库和伪造的 GitHub 快照，不消耗 GitHub API 配额。
+测试全部使用内存数据库、伪造的 GitHub 快照和模拟 Hermes HTTP 网关，不消耗
+GitHub 或模型 API 配额。
 
 ## 当前边界
 
@@ -236,10 +268,13 @@ workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
 - 仍使用自动建表；进入多人试用前应增加正式迁移工具和 PostgreSQL。
 - `user_id` 目前是调用方提供的本地标识，不是可信身份。完成登录、租户校验和
   API 授权前，不应把当前连接接口直接暴露到不可信网络。
-- rules-v1 只依据标签、讨论、reaction 与更新时间排序，不替代维护者判断。
+- `rules-v1` 只依据标签、讨论、reaction 与更新时间排序；Hermes 输出也必须
+  通过结构校验、证据质量门禁和人工审批，两者都不替代维护者判断。
+- Hermes profile 必须专用于本系统且不启用任何工具或 MCP；普通 Hermes API
+  Server 默认包含终端、文件和网络工具，不能直接用于当前只读岗位。
 - 尚未抽取个人偏好；当前只保存生成偏好所需的修改和决策证据。
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-下一阶段应增加 PostgreSQL、正式数据库迁移、登录与租户隔离，再接入 Hermes
-生成更丰富的分析；个人记忆抽取仍应建立在真实反馈数据之上。
+下一阶段应增加网页管理端、PostgreSQL、正式数据库迁移、登录与租户隔离；
+个人记忆抽取仍应建立在真实反馈数据之上。

@@ -52,6 +52,13 @@ class RuleBasedRuntime(AgentRuntime):
             },
         )
 
+    async def status(self) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "runtime": "rules-v1",
+            "remote": False,
+        }
+
     def _daily_brief(self, snapshot: RepositorySnapshot) -> dict[str, Any]:
         now = snapshot.fetched_at.astimezone(UTC)
         recent_issues = sorted(snapshot.issues, key=lambda item: item.updated_at, reverse=True)
@@ -250,4 +257,3 @@ class RuleBasedRuntime(AgentRuntime):
         if labels & {"documentation", "docs"}:
             return "确认文档范围后安排小批次修订"
         return "补充影响范围和验收标准后再确认优先级"
-

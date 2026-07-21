@@ -25,3 +25,9 @@ class AgentRuntime(ABC):
     ) -> AgentResult:
         raise NotImplementedError
 
+    async def status(self) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "runtime": self.__class__.__name__,
+            "remote": False,
+        }

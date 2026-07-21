@@ -22,6 +22,14 @@ async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
         assert health.json()["api_port"] == 18110
         assert health.json()["task_timeout_seconds"] == 300.0
 
+        runtime_status = await client.get("/api/v1/runtime/status")
+        assert runtime_status.status_code == 200
+        assert runtime_status.json() == {
+            "status": "ok",
+            "runtime": "rules-v1",
+            "remote": False,
+        }
+
         response = await client.post(
             "/api/v1/tasks/project-maintenance",
             headers={"Idempotency-Key": "api-project-maintenance-1"},

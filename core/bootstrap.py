@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from adapters.github.app import GitHubAppClient
 from adapters.github.client import HttpGitHubGateway
 from adapters.github.models import GitHubAppProvider, GitHubGateway
+from adapters.hermes.client import HermesApiClient
+from adapters.hermes.runtime import HermesRuntime
 from adapters.runtime.rule_based import RuleBasedRuntime
 from core.agents.employee import EmployeeCatalog
 from core.agents.runtime import AgentRuntime
@@ -30,6 +32,7 @@ class Container:
     employees: EmployeeCatalog
     skill_registry: SkillRegistry
     workflows: WorkflowCatalog
+    runtime: AgentRuntime
     github_connections: GitHubConnectionService
     project_maintenance: ProjectMaintenanceService
     approvals: ApprovalService
@@ -60,12 +63,30 @@ def build_container(
     )
 
     if runtime is None:
-        if settings.runtime_name != "rules":
-            raise ValueError(
-                "Only the built-in rules runtime can be auto-configured. "
-                "Inject HermesRuntime when DIGITAL_EMPLOYEE_RUNTIME=hermes."
+        if settings.runtime_name == "rules":
+            runtime = RuleBasedRuntime()
+        elif settings.runtime_name == "hermes":
+            if settings.hermes_api_key is None:
+                raise ValueError(
+                    "HERMES_API_KEY is required when "
+                    "DIGITAL_EMPLOYEE_RUNTIME=hermes"
+                )
+            runtime = HermesRuntime(
+                HermesApiClient(
+                    api_url=settings.hermes_api_url,
+                    api_key=settings.hermes_api_key,
+                    model=settings.hermes_model,
+                    request_timeout_seconds=(
+                        settings.hermes_request_timeout_seconds
+                    ),
+                    poll_interval_seconds=settings.hermes_poll_interval_seconds,
+                    max_context_bytes=settings.hermes_max_context_bytes,
+                )
             )
-        runtime = RuleBasedRuntime()
+        else:
+            raise ValueError(
+                "DIGITAL_EMPLOYEE_RUNTIME must be rules or hermes"
+            )
     github = github or HttpGitHubGateway(
         token=settings.github_token,
         api_url=settings.github_api_url,
@@ -102,6 +123,7 @@ def build_container(
         employees=employees,
         skill_registry=skill_registry,
         workflows=workflows,
+        runtime=runtime,
         github_connections=github_connections,
         project_maintenance=project_maintenance,
         approvals=ApprovalService(store),

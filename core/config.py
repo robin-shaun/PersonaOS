@@ -18,6 +18,12 @@ class Settings:
     github_api_version: str = "2026-03-10"
     github_app_id: str | None = None
     github_app_private_key: str | None = field(default=None, repr=False)
+    hermes_api_url: str = "http://127.0.0.1:8642"
+    hermes_api_key: str | None = field(default=None, repr=False)
+    hermes_model: str = "hermes-agent"
+    hermes_request_timeout_seconds: float = 20.0
+    hermes_poll_interval_seconds: float = 0.5
+    hermes_max_context_bytes: int = 1_000_000
     api_host: str = "127.0.0.1"
     api_port: int = 18110
     queue_max_attempts: int = 3
@@ -46,12 +52,37 @@ class Settings:
             workflow_config_dir=project_root / "data" / "workflows",
             github_token=os.getenv("GITHUB_TOKEN") or None,
             github_api_url=os.getenv("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
-            runtime_name=os.getenv("DIGITAL_EMPLOYEE_RUNTIME", "rules"),
+            runtime_name=os.getenv("DIGITAL_EMPLOYEE_RUNTIME", "rules")
+            .strip()
+            .lower(),
             github_api_version=os.getenv(
                 "GITHUB_API_VERSION", "2026-03-10"
             ).strip(),
             github_app_id=github_app_id,
             github_app_private_key=github_app_private_key,
+            hermes_api_url=(
+                os.getenv("HERMES_API_URL") or "http://127.0.0.1:8642"
+            )
+            .strip()
+            .rstrip("/"),
+            hermes_api_key=(os.getenv("HERMES_API_KEY") or "").strip() or None,
+            hermes_model=(os.getenv("HERMES_MODEL") or "hermes-agent").strip(),
+            hermes_request_timeout_seconds=_env_float(
+                "HERMES_REQUEST_TIMEOUT_SECONDS",
+                default=20.0,
+                minimum=0.1,
+            ),
+            hermes_poll_interval_seconds=_env_float(
+                "HERMES_POLL_INTERVAL_SECONDS",
+                default=0.5,
+                minimum=0.05,
+            ),
+            hermes_max_context_bytes=_env_int(
+                "HERMES_MAX_CONTEXT_BYTES",
+                default=1_000_000,
+                minimum=1_000,
+                maximum=10_000_000,
+            ),
             api_host=os.getenv("DIGITAL_EMPLOYEE_API_HOST", "127.0.0.1"),
             api_port=_env_int(
                 "DIGITAL_EMPLOYEE_API_PORT",

@@ -6,6 +6,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from adapters.github.client import GitHubAdapterError
+from adapters.hermes.client import HermesAdapterError
 from apps.api.schemas import (
     ApprovalDecisionRequest,
     FeedbackCreate,
@@ -26,7 +27,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="Digital Employee MVP",
-        version="0.4.0",
+        version="0.5.0",
         description=(
             "Approval-first, read-only GitHub project maintenance employee. "
             "Every result includes evidence and an execution trace."
@@ -73,6 +74,16 @@ def create_app(container: Container | None = None) -> FastAPI:
     @app.get("/api/v1/skills")
     async def list_skills() -> list[dict[str, Any]]:
         return container.store.list_skills()
+
+    @app.get("/api/v1/runtime/status")
+    async def runtime_status() -> dict[str, Any]:
+        try:
+            return await container.runtime.status()
+        except HermesAdapterError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
 
     @app.post(
         "/api/v1/github/connections",

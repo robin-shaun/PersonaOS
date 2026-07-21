@@ -16,6 +16,8 @@ class HermesClient(Protocol):
         tools: list[str],
     ) -> dict[str, Any]: ...
 
+    async def status(self) -> dict[str, Any]: ...
+
 
 class HermesRuntime(AgentRuntime):
     """Keeps Hermes-specific objects outside the business core."""
@@ -44,3 +46,5 @@ class HermesRuntime(AgentRuntime):
             metadata=dict(response.get("metadata") or {}),
         )
 
+    async def status(self) -> dict[str, Any]:
+        return await self._client.status()

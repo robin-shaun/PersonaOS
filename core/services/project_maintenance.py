@@ -231,6 +231,7 @@ class ProjectMaintenanceService:
             employee=employee,
             task_id=task_id,
             task_run_id=task_run_id,
+            user_id=user_id,
             repository=repository,
             github=github,
             max_items=max_items,
@@ -294,6 +295,7 @@ class ProjectMaintenanceService:
         employee: EmployeeDefinition,
         task_id: str,
         task_run_id: str,
+        user_id: str,
         repository: str,
         github: GitHubGateway,
         max_items: int,
@@ -351,6 +353,11 @@ class ProjectMaintenanceService:
                     employee=employee,
                     context={
                         "repository_snapshot": state["collect_repository"],
+                        "runtime_scope": {
+                            "task_id": task_id,
+                            "task_run_id": task_run_id,
+                            "user_id": user_id,
+                        },
                     },
                 )
                 return StepResult(

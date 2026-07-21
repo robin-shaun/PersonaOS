@@ -22,7 +22,9 @@
          ├── SkillExecutor   ── Skill 注册与工具权限校验
          │       │
          │       ▼
-         │   AgentRuntime ───── rules-v1 / Hermes
+         │   AgentRuntime ───── rules-v1 / HermesRuntime
+         │                              │
+         │                              └── 认证 Runs API ── Hermes gateway
          ├── GitHubConnectionService ── 用户、安装与仓库授权关系
          ├── GitHubGateway  ── 只读仓库快照
          ├── Evaluator      ── 引用完整性和输出质量
@@ -114,21 +116,30 @@ Workflow 每一步都会把当前 state 和 history 写入 workflow_runs。工�
 - deliver_recommendation 固定为 required，Workflow 必须暂停。
 - 每份报告声明 read_only 和 github_mutations_performed。
 - 推荐项的 Issue 编号与证据链接必须存在于本次仓库快照中，否则质量门禁失败。
+- Hermes 使用专用无工具 profile；每次运行前检查 `/v1/capabilities` 和
+  `/v1/toolsets`，发现任何已启用远端工具即拒绝提交。
+- Hermes API key 只来自进程环境，不进入上下文、数据库、日志或错误正文。
+- 仓库内容按不可信数据处理；Hermes 只能返回 Skill schema 要求的 JSON 对象，
+  仍需通过确定性的 evaluator 和人工审批。
 
 ## 替换运行时
 
-AgentRuntime 只暴露一个异步 run 方法，输入为任务名、结构化上下文和工具名，
-输出为结构化 AgentResult。HermesRuntime 只接受一个满足 HermesClient
-协议的客户端。
+AgentRuntime 暴露异步 `run` 和运行状态接口，输入为任务名、结构化上下文和
+业务工具名，输出为结构化 AgentResult。工具名只用于说明主应用已经执行过的
+授权业务工具，不会转发为 Hermes 工具权限。
 
-接入具体 Hermes SDK 时应在 adapters/hermes 下完成请求、工具映射和响应
-解析。core 中不得导入 Hermes 类型。生产启用前还需要为模型输出增加 JSON
-Schema 校验，并保留当前确定性 evaluator 作为交付门禁。
+HermesRuntime 通过 `HermesApiClient` 使用官方 `/v1/runs` 接口。客户端先探测
+Runs 提交、状态与停止能力，再确认 API Server 没有启用任何 toolset；随后提交
+不可信数据信封、轮询完成状态并校验 Skill 的必需字段和基础类型。本地取消会
+尽力调用远端 stop。core 中不导入 Hermes 类型，`rules-v1` 继续作为离线基准。
+
+每次 Skill 使用独立 session ID，当前不发送长期记忆 scope header。用户身份、
+任务和 task_run 只作为运行关联数据进入上下文，不授权 Hermes 代表用户行动。
 
 ## 下一批技术任务
 
-1. 增加 PostgreSQL、数据库迁移、登录和可信租户隔离；
-2. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
+1. 增加网页管理端，覆盖仓库连接、任务轨迹、审批和运行时状态；
+2. 增加 PostgreSQL、数据库迁移、登录和可信租户隔离；
 3. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
 4. 提供候选偏好的查看、确认、撤销、冲突和过期机制；
 5. 增加 GitHub App 安装回调和 webhook 驱动的自动连接同步。
