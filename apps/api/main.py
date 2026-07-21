@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from apps.api.schemas import (
@@ -13,6 +13,7 @@ from apps.api.schemas import (
 from core.bootstrap import Container, build_container
 from core.services.project_maintenance import (
     ProjectMaintenanceCommand,
+    TaskConflictError,
     TaskExecutionFailed,
 )
 
@@ -21,7 +22,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="Digital Employee MVP",
-        version="0.1.0",
+        version="0.2.0",
         description=(
             "Approval-first, read-only GitHub project maintenance employee. "
             "Every result includes evidence and an execution trace."
@@ -44,11 +45,13 @@ def create_app(container: Container | None = None) -> FastAPI:
         )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
+    async def health() -> dict[str, Any]:
         return {
             "status": "ok",
             "runtime": container.settings.runtime_name,
             "github_mode": "read_only",
+            "api_port": container.settings.api_port,
+            "queue": container.store.queue_summary(),
         }
 
     @app.get("/api/v1/employees")
@@ -67,24 +70,61 @@ def create_app(container: Container | None = None) -> FastAPI:
 
     @app.post(
         "/api/v1/tasks/project-maintenance",
-        status_code=status.HTTP_201_CREATED,
+        status_code=status.HTTP_202_ACCEPTED,
     )
     async def create_project_maintenance_task(
         payload: ProjectMaintenanceTaskCreate,
+        idempotency_key: str | None = Header(
+            default=None,
+            alias="Idempotency-Key",
+            max_length=200,
+        ),
     ) -> dict[str, Any]:
         try:
-            return await container.project_maintenance.create_and_run(
+            return container.project_maintenance.enqueue(
                 ProjectMaintenanceCommand(
                     repository=payload.repository,
                     employee_id=payload.employee_id,
                     user_id=payload.user_id,
                     workflow_name=payload.workflow_name,
                     max_items=payload.max_items,
-                )
+                ),
+                idempotency_key=idempotency_key,
             )
+        except TaskConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
         except (KeyError, PermissionError, ValueError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/tasks/{task_id}/retry",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def retry_task(task_id: str) -> dict[str, Any]:
+        try:
+            queue_job = container.store.retry_failed_queue_job(task_id)
+            bundle = container.store.get_task_bundle(task_id)
+            bundle["queue_submission"] = {
+                "created": False,
+                "idempotency_replayed": False,
+                "requeued": True,
+                "queue_job_id": queue_job["id"],
+            }
+            return bundle
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
                 detail=str(exc),
             ) from exc
 
@@ -146,4 +186,3 @@ def create_app(container: Container | None = None) -> FastAPI:
 
 
 app = create_app()
-

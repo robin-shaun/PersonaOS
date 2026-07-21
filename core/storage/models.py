@@ -120,6 +120,45 @@ class TaskRecord(Base):
     )
 
 
+class QueueJobRecord(Base):
+    __tablename__ = "queue_jobs"
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_queue_job_task"),
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_queue_job_user_idempotency",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True, nullable=False
+    )
+    lease_owner: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class TaskRunRecord(Base):
     __tablename__ = "task_runs"
 
@@ -242,4 +281,3 @@ class DecisionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
-

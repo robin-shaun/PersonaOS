@@ -21,7 +21,7 @@
           ↓
     产物、修改、反馈与决策记录
 
-第一版使用确定性的 rules-v1 运行时，因此无需模型密钥即可运行和测试。
+当前版本使用确定性的 rules-v1 运行时，因此无需模型密钥即可运行和测试。
 业务层只依赖 AgentRuntime 接口，Hermes 适配边界位于
 adapters/hermes/runtime.py，后续替换运行时不需要重写 Skill、Workflow、
 审批或持久化代码。
@@ -34,10 +34,17 @@ adapters/hermes/runtime.py，后续替换运行时不需要重写 Skill、Workfl
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 cp .env.example .env
-.venv/bin/uvicorn apps.api.main:app --reload --env-file .env
+.venv/bin/python -m apps.api
 ~~~
 
-打开 http://127.0.0.1:8000/docs 查看交互式 API。
+API 默认监听尚未被本机其他服务使用的 `127.0.0.1:18110`。打开
+http://127.0.0.1:18110/docs 查看交互式 API。
+
+另开一个终端启动持久化 Worker：
+
+~~~bash
+.venv/bin/python -m apps.worker.run
+~~~
 
 访问公共仓库时可以不设置 GITHUB_TOKEN，但匿名 GitHub API 的请求额度较低。
 访问私有仓库时必须提供只读 Token。应用只实现 GET 请求，即使 Token 拥有
@@ -48,8 +55,9 @@ cp .env.example .env
 创建项目维护任务：
 
 ~~~bash
-curl -X POST http://127.0.0.1:8000/api/v1/tasks/project-maintenance \
+curl -X POST http://127.0.0.1:18110/api/v1/tasks/project-maintenance \
   -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: owner-repository-2026-07-21' \
   -d '{
     "repository": "owner/repository",
     "user_id": "shaun",
@@ -57,12 +65,18 @@ curl -X POST http://127.0.0.1:8000/api/v1/tasks/project-maintenance \
   }'
 ~~~
 
-成功后任务状态是 awaiting_approval。响应中的 approvals[0].id 是审批 ID。
+API 会立即返回 `202 Accepted` 和 `pending` 任务。Worker 领取任务后，状态依次
+变为 `running` 和 `awaiting_approval`。通过任务详情接口轮询，响应中的
+`approvals[0].id` 是审批 ID：
+
+~~~bash
+curl http://127.0.0.1:18110/api/v1/tasks/TASK_ID
+~~~
 
 接受建议：
 
 ~~~bash
-curl -X POST http://127.0.0.1:8000/api/v1/approvals/APPROVAL_ID/decision \
+curl -X POST http://127.0.0.1:18110/api/v1/approvals/APPROVAL_ID/decision \
   -H 'Content-Type: application/json' \
   -d '{
     "decision": "approved",
@@ -80,27 +94,34 @@ edited_output 字段中。系统会保留版本 1 原稿、版本 2 修改稿、
 .venv/bin/python -m apps.worker.run_once owner/repository --max-items 20
 ~~~
 
+后台 Worker 只处理一个队列任务后退出：
+
+~~~bash
+.venv/bin/python -m apps.worker.run --once
+~~~
+
 ## API
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET | /health | 运行状态与安全模式 |
+| GET | /health | 运行状态、安全模式与队列计数 |
 | GET | /api/v1/employees | 查看岗位定义 |
 | GET | /api/v1/skills | 查看已注册 Skill |
-| POST | /api/v1/tasks/project-maintenance | 创建并执行只读维护任务 |
+| POST | /api/v1/tasks/project-maintenance | 幂等创建并入队只读维护任务 |
 | GET | /api/v1/tasks | 查看任务列表 |
 | GET | /api/v1/tasks/{task_id} | 查看完整执行轨迹 |
+| POST | /api/v1/tasks/{task_id}/retry | 重新入队已耗尽重试的失败任务 |
 | POST | /api/v1/approvals/{approval_id}/decision | 接受、修改或拒绝 |
 | POST | /api/v1/tasks/{task_id}/feedback | 追加评分与文字反馈 |
 
-任务详情一次返回 task_runs、tool_calls、workflow_runs、approvals、feedback、
-artifacts 和 decision_records，便于调试和后续偏好学习。
+任务详情一次返回 task_runs、queue_jobs、tool_calls、workflow_runs、approvals、
+feedback、artifacts 和 decision_records，便于调试和后续偏好学习。
 
 ## 代码结构
 
     apps/
       api/                 FastAPI 接口
-      worker/              单次任务命令行入口
+      worker/              持久化 Worker 与同步调试入口
     core/
       agents/              Employee Definition 与 AgentRuntime
       skills/              Skill 注册和权限检查
@@ -130,12 +151,12 @@ artifacts 和 decision_records，便于调试和后续偏好学习。
 
 ## 当前边界
 
-- 任务目前在 HTTP 请求内同步执行，适合 MVP，不适合长任务或高并发。
-- 使用 SQLite 和自动建表；进入多人试用前应增加正式迁移工具和 PostgreSQL。
+- 队列采用 SQLite 和“至少一次”执行语义，租约与幂等键可处理 Worker 崩溃和
+  重复请求，但不适合大规模并发。
+- 仍使用自动建表；进入多人试用前应增加正式迁移工具和 PostgreSQL。
 - rules-v1 只依据标签、讨论、reaction 与更新时间排序，不替代维护者判断。
 - 尚未抽取个人偏好；当前只保存生成偏好所需的修改和决策证据。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-下一阶段应先增加后台 Worker、任务恢复和 GitHub App 安装流程，再接入
-Hermes 生成更丰富的分析；个人记忆抽取仍应建立在真实反馈数据之上。
-
+下一阶段应增加任务取消/超时和 GitHub App 安装流程，再接入 Hermes 生成
+更丰富的分析；个人记忆抽取仍应建立在真实反馈数据之上。

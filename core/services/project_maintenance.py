@@ -34,6 +34,10 @@ class TaskExecutionFailed(RuntimeError):
         self.cause = cause
 
 
+class TaskConflictError(RuntimeError):
+    pass
+
+
 class ProjectMaintenanceService:
     def __init__(
         self,
@@ -44,6 +48,7 @@ class ProjectMaintenanceService:
         skills: SkillExecutor,
         github: GitHubGateway,
         evaluator: ProjectMaintenanceEvaluator,
+        queue_max_attempts: int = 3,
     ) -> None:
         self._store = store
         self._employees = employees
@@ -51,26 +56,113 @@ class ProjectMaintenanceService:
         self._skills = skills
         self._github = github
         self._evaluator = evaluator
+        self._queue_max_attempts = max(1, queue_max_attempts)
+
+    def enqueue(
+        self,
+        command: ProjectMaintenanceCommand,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        repository, employee, workflow, task_input = self._resolve_command(command)
+        try:
+            submission = self._store.create_queued_task(
+                employee_id=employee.employee_id,
+                user_id=command.user_id,
+                workflow_name=workflow.name,
+                task_input=task_input,
+                idempotency_key=idempotency_key,
+                max_attempts=self._queue_max_attempts,
+            )
+        except ValueError as exc:
+            if "Idempotency key" in str(exc):
+                raise TaskConflictError(str(exc)) from exc
+            raise
+        bundle = self._store.get_task_bundle(submission["task_id"])
+        bundle["queue_submission"] = {
+            "created": submission["created"],
+            "idempotency_replayed": not submission["created"],
+            "queue_job_id": submission["queue_job_id"],
+            "repository": repository,
+        }
+        return bundle
 
     async def create_and_run(
         self,
         command: ProjectMaintenanceCommand,
     ) -> dict[str, Any]:
-        repository = normalize_repository(command.repository)
-        employee = self._employees.get(command.employee_id)
-        workflow = self._workflows.get(command.workflow_name)
-        self._validate_assignment(employee, workflow)
-
+        repository, employee, workflow, task_input = self._resolve_command(command)
         task_id = self._store.create_task(
             employee_id=employee.employee_id,
             user_id=command.user_id,
             workflow_name=workflow.name,
-            task_input={
+            task_input=task_input,
+        )
+        return await self._run_existing_task(
+            task_id=task_id,
+            repository=repository,
+            employee=employee,
+            workflow=workflow,
+            user_id=command.user_id,
+            max_items=command.max_items,
+        )
+
+    async def run_task(self, task_id: str) -> dict[str, Any]:
+        task = self._store.get_task_for_execution(task_id)
+        task_input = task["input"]
+        command = ProjectMaintenanceCommand(
+            repository=task_input["repository"],
+            employee_id=task["employee_id"],
+            user_id=task["user_id"],
+            workflow_name=task["workflow_name"],
+            max_items=int(task_input["max_items"]),
+        )
+        repository, employee, workflow, _ = self._resolve_command(command)
+        return await self._run_existing_task(
+            task_id=task_id,
+            repository=repository,
+            employee=employee,
+            workflow=workflow,
+            user_id=command.user_id,
+            max_items=command.max_items,
+        )
+
+    def _resolve_command(
+        self,
+        command: ProjectMaintenanceCommand,
+    ) -> tuple[
+        str,
+        EmployeeDefinition,
+        WorkflowDefinition,
+        dict[str, Any],
+    ]:
+        repository = normalize_repository(command.repository)
+        if not 1 <= command.max_items <= 100:
+            raise ValueError("max_items must be between 1 and 100")
+        employee = self._employees.get(command.employee_id)
+        workflow = self._workflows.get(command.workflow_name)
+        self._validate_assignment(employee, workflow)
+        return (
+            repository,
+            employee,
+            workflow,
+            {
                 "repository": repository,
                 "max_items": command.max_items,
                 "read_only": True,
             },
         )
+
+    async def _run_existing_task(
+        self,
+        *,
+        task_id: str,
+        repository: str,
+        employee: EmployeeDefinition,
+        workflow: WorkflowDefinition,
+        user_id: str,
+        max_items: int,
+    ) -> dict[str, Any]:
         plan = [
             {
                 "step_id": step.id,
@@ -85,9 +177,9 @@ class ProjectMaintenanceService:
                 "task_id": task_id,
                 "task_run_id": task_run_id,
                 "repository": repository,
-                "max_items": command.max_items,
+                "max_items": max_items,
                 "employee_id": employee.employee_id,
-                "user_id": command.user_id,
+                "user_id": user_id,
             }
         }
         workflow_run_id = self._store.create_workflow_run(
@@ -102,7 +194,7 @@ class ProjectMaintenanceService:
             task_id=task_id,
             task_run_id=task_run_id,
             repository=repository,
-            max_items=command.max_items,
+            max_items=max_items,
         )
         engine = WorkflowEngine(handlers)
 
@@ -336,4 +428,3 @@ class ApprovalService:
             reason=reason,
         )
         return self._store.get_task_bundle(approval["task_id"])
-

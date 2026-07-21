@@ -74,6 +74,7 @@ def build_container(
         skills=skill_executor,
         github=github,
         evaluator=ProjectMaintenanceEvaluator(),
+        queue_max_attempts=settings.queue_max_attempts,
     )
     return Container(
         settings=settings,
@@ -85,4 +86,3 @@ def build_container(
         project_maintenance=project_maintenance,
         approvals=ApprovalService(store),
     )
-

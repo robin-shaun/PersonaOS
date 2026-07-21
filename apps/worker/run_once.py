@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import json
 
+from dotenv import load_dotenv
+
 from core.bootstrap import build_container
 from core.services.project_maintenance import ProjectMaintenanceCommand
 
@@ -19,6 +21,7 @@ def parse_args() -> argparse.Namespace:
 
 
 async def run() -> None:
+    load_dotenv()
     args = parse_args()
     container = build_container()
     bundle = await container.project_maintenance.create_and_run(
@@ -33,4 +36,3 @@ async def run() -> None:
 
 if __name__ == "__main__":
     asyncio.run(run())
-

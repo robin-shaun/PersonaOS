@@ -12,9 +12,9 @@
 
 ## 模块关系
 
-    API / Worker
-         │
-         ▼
+    API ──入队──▶ SQLite Queue ◀──领取/续租── Worker
+                                             │
+                                             ▼
     ProjectMaintenanceService
          │
          ├── EmployeeCatalog ── 岗位权限与审批策略
@@ -29,6 +29,17 @@
 
 业务服务不依赖 httpx、Hermes SDK 或 GitHub 响应对象。所有外部对象先在
 adapter 中转换为稳定领域模型。
+
+## 持久化队列
+
+API 只负责校验并创建 `pending` 任务，不在 HTTP 请求内访问 GitHub。每个任务
+对应一个 queue_job，状态为 `queued`、`leased`、`completed` 或 `failed`。
+Worker 原子领取作业后定期续租；进程在完成前退出时，租约到期的作业可以由
+其他 Worker 回收，旧的运行轨迹会标记为失败并保留。
+
+同一用户可以通过 `Idempotency-Key` 安全重试创建请求。相同键和相同输入返回
+原任务；相同键配不同输入会返回冲突。Worker 自动重试耗尽后，任务保持
+`failed`，用户可通过重试 API 将尝试次数清零并重新入队。
 
 ## Workflow 状态
 
@@ -79,11 +90,9 @@ Schema 校验，并保留当前确定性 evaluator 作为交付门禁。
 
 ## 下一批技术任务
 
-1. 把同步任务移入持久化队列和独立 Worker；
-2. 增加失败任务恢复、幂等键和超时取消；
-3. 使用 GitHub App 安装令牌替代长期个人 Token；
-4. 增加 PostgreSQL、数据库迁移和租户隔离；
-5. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
-6. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
-7. 提供候选偏好的查看、确认、撤销、冲突和过期机制。
-
+1. 增加运行中任务的超时与主动取消；
+2. 使用 GitHub App 安装令牌替代长期个人 Token；
+3. 增加 PostgreSQL、数据库迁移和租户隔离；
+4. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
+5. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
+6. 提供候选偏好的查看、确认、撤销、冲突和过期机制。
