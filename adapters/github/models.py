@@ -45,6 +45,16 @@ class RepositorySnapshot(BaseModel):
     fetched_at: datetime
 
 
+class GitHubRepositoryAccess(BaseModel):
+    installation_id: int
+    repository: str
+    account_login: str
+    private: bool
+    permissions: dict[str, str] = Field(default_factory=dict)
+    repository_selection: str | None = None
+    verified_at: datetime
+
+
 class GitHubGateway(Protocol):
     async def get_repository_snapshot(
         self,
@@ -53,3 +63,16 @@ class GitHubGateway(Protocol):
         max_items: int = 50,
     ) -> RepositorySnapshot: ...
 
+
+class GitHubAppProvider(Protocol):
+    async def verify_repository_access(
+        self,
+        installation_id: int,
+        repository: str,
+    ) -> GitHubRepositoryAccess: ...
+
+    def gateway_for_installation(
+        self,
+        installation_id: int,
+        repository: str,
+    ) -> GitHubGateway: ...

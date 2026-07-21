@@ -21,7 +21,7 @@
           ↓
     产物、修改、反馈与决策记录
 
-当前 0.3.0 版本使用确定性的 rules-v1 运行时，因此无需模型密钥即可运行和测试。
+当前 0.4.0 版本使用确定性的 rules-v1 运行时，因此无需模型密钥即可运行和测试。
 业务层只依赖 AgentRuntime 接口，Hermes 适配边界位于
 adapters/hermes/runtime.py，后续替换运行时不需要重写 Skill、Workflow、
 审批或持久化代码。
@@ -51,9 +51,64 @@ Worker 默认给每次执行 300 秒硬超时，并每 0.25 秒检查一次主�
 `DIGITAL_EMPLOYEE_WORKER_CONTROL_POLL_SECONDS` 调整，或使用 Worker 的
 `--task-timeout` 与 `--control-poll` 参数临时覆盖。
 
-访问公共仓库时可以不设置 GITHUB_TOKEN，但匿名 GitHub API 的请求额度较低。
-访问私有仓库时必须提供只读 Token。应用只实现 GET 请求，即使 Token 拥有
-更高权限，当前适配器也没有写方法。
+访问公共仓库时可以不设置 `GITHUB_TOKEN`，但匿名 GitHub API 的请求额度较低。
+`GITHUB_TOKEN` 仅保留为本地兼容入口；连接私有仓库推荐使用 GitHub App。
+应用只实现 GET 请求，不包含修改 Issue、PR 或仓库的工具。
+
+## 连接 GitHub App
+
+创建 GitHub App 时只授予以下 Repository permissions：
+
+- Metadata：Read-only（GitHub App 固有的最低权限）；
+- Issues：Read-only；
+- Pull requests：Read-only。
+
+将 App 安装到明确选择的仓库，然后把 App ID 和私钥路径写入 `.env`。私钥应
+放在仓库目录之外；仓库也已忽略 `*.pem` 和 `*.key`，用于降低误提交风险。
+
+~~~bash
+GITHUB_APP_ID=12345
+GITHUB_APP_PRIVATE_KEY_PATH=/secure/path/ai-colleague.private-key.pem
+~~~
+
+配置依据可参考 GitHub 官方的
+[App JWT](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app)
+和
+[installation token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
+说明。服务生成 RS256 JWT，再申请限制到单个仓库、Issues/PR 只读的短期令牌。
+令牌只在进程内缓存，不写入连接表、任务输入或执行轨迹。
+
+用安装 ID 验证并建立用户—仓库连接：
+
+~~~bash
+curl -X POST http://127.0.0.1:18110/api/v1/github/connections \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id": "shaun",
+    "installation_id": 9876,
+    "repository": "owner/private-repository"
+  }'
+~~~
+
+响应中的 `id` 是仓库连接 ID。创建任务时可以不再传仓库名：
+
+~~~bash
+curl -X POST http://127.0.0.1:18110/api/v1/tasks/project-maintenance \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: private-repository-2026-07-21' \
+  -d '{
+    "github_connection_id": "CONNECTION_ID",
+    "user_id": "shaun",
+    "max_items": 50
+  }'
+~~~
+
+断开连接后，新任务和队列中尚未执行的任务都不能再通过该连接读取仓库：
+
+~~~bash
+curl -X DELETE \
+  'http://127.0.0.1:18110/api/v1/github/connections/CONNECTION_ID?user_id=shaun'
+~~~
 
 ## 跑一个任务
 
@@ -127,6 +182,9 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | GET | /health | 运行状态、安全模式与队列计数 |
 | GET | /api/v1/employees | 查看岗位定义 |
 | GET | /api/v1/skills | 查看已注册 Skill |
+| POST | /api/v1/github/connections | 验证并保存 GitHub App 仓库连接 |
+| GET | /api/v1/github/connections | 按用户查看仓库连接 |
+| DELETE | /api/v1/github/connections/{connection_id} | 断开仓库连接 |
 | POST | /api/v1/tasks/project-maintenance | 幂等创建并入队只读维护任务 |
 | GET | /api/v1/tasks | 查看任务列表 |
 | GET | /api/v1/tasks/{task_id} | 查看完整执行轨迹 |
@@ -152,7 +210,7 @@ workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
       services/            项目维护和审批业务流程
       storage/             SQLite / SQLAlchemy 数据模型
     adapters/
-      github/              只读 GitHub REST 适配器
+      github/              GitHub App 鉴权与只读 REST 适配器
       runtime/             可离线验证的规则运行时
       hermes/              Hermes 隔离接口
     data/
@@ -176,10 +234,12 @@ workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
 - 队列采用 SQLite 和“至少一次”执行语义，租约、幂等键、主动取消与执行超时
   可处理重复请求和常见 Worker 故障，但不适合大规模并发。
 - 仍使用自动建表；进入多人试用前应增加正式迁移工具和 PostgreSQL。
+- `user_id` 目前是调用方提供的本地标识，不是可信身份。完成登录、租户校验和
+  API 授权前，不应把当前连接接口直接暴露到不可信网络。
 - rules-v1 只依据标签、讨论、reaction 与更新时间排序，不替代维护者判断。
 - 尚未抽取个人偏好；当前只保存生成偏好所需的修改和决策证据。
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-下一阶段应使用 GitHub App 安装令牌替代长期个人 Token，再接入 Hermes 生成
-更丰富的分析；个人记忆抽取仍应建立在真实反馈数据之上。
+下一阶段应增加 PostgreSQL、正式数据库迁移、登录与租户隔离，再接入 Hermes
+生成更丰富的分析；个人记忆抽取仍应建立在真实反馈数据之上。

@@ -6,10 +6,16 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ProjectMaintenanceTaskCreate(BaseModel):
-    repository: str = Field(
+    repository: str | None = Field(
+        default=None,
         min_length=3,
         max_length=200,
         examples=["owner/repository"],
+    )
+    github_connection_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=36,
     )
     employee_id: str = Field(
         default="github-maintainer-001",
@@ -26,10 +32,64 @@ class ProjectMaintenanceTaskCreate(BaseModel):
 
     @field_validator("repository")
     @classmethod
+    def validate_repository(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().strip("/")
+        if len(normalized.split("/")) != 2:
+            raise ValueError("repository must use the owner/name format")
+        return normalized
+
+    @field_validator("user_id")
+    @classmethod
+    def normalize_user_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("user_id must not be empty")
+        return normalized
+
+    @field_validator("github_connection_id")
+    @classmethod
+    def normalize_connection_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("github_connection_id must not be empty")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_repository_source(self) -> "ProjectMaintenanceTaskCreate":
+        if self.repository is None and self.github_connection_id is None:
+            raise ValueError(
+                "repository or github_connection_id is required"
+            )
+        return self
+
+
+class GitHubConnectionCreate(BaseModel):
+    user_id: str = Field(default="local-user", min_length=1, max_length=64)
+    installation_id: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    repository: str = Field(
+        min_length=3,
+        max_length=200,
+        examples=["owner/private-repository"],
+    )
+
+    @field_validator("repository")
+    @classmethod
     def validate_repository(cls, value: str) -> str:
         normalized = value.strip().strip("/")
         if len(normalized.split("/")) != 2:
             raise ValueError("repository must use the owner/name format")
+        return normalized
+
+    @field_validator("user_id")
+    @classmethod
+    def normalize_user_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("user_id must not be empty")
         return normalized
 
 

@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     JSON,
     DateTime,
     ForeignKey,
@@ -30,6 +32,43 @@ class UserRecord(Base):
     display_name: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class GitHubConnectionRecord(Base):
+    __tablename__ = "github_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider",
+            "repository",
+            name="uq_github_connection_user_repository",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="github_app")
+    installation_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    repository: Mapped[str] = mapped_column(String(300), index=True)
+    account_login: Mapped[str] = mapped_column(String(200), index=True)
+    private: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    permissions: Mapped[dict[str, str]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    repository_selection: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    disconnected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

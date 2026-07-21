@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+*.pem
+*.key
 var/*.db
 var/*.db-*
-

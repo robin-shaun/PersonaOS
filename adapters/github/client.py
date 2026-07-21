@@ -69,6 +69,7 @@ class HttpGitHubGateway:
         client: httpx.AsyncClient | None = None,
         timeout_seconds: float = 20.0,
         proxy_url: str | None = None,
+        api_version: str = "2026-03-10",
     ) -> None:
         self._api_url = api_url.rstrip("/")
         self._client = client
@@ -76,8 +77,8 @@ class HttpGitHubGateway:
         self._proxy_url = proxy_url or proxy_url_from_environment(self._api_url)
         self._headers = {
             "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "digital-employee-mvp/0.1",
+            "X-GitHub-Api-Version": api_version,
+            "User-Agent": "digital-employee-mvp/0.4",
         }
         if token:
             self._headers["Authorization"] = f"Bearer {token}"

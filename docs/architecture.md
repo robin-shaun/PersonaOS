@@ -23,6 +23,7 @@
          │       │
          │       ▼
          │   AgentRuntime ───── rules-v1 / Hermes
+         ├── GitHubConnectionService ── 用户、安装与仓库授权关系
          ├── GitHubGateway  ── 只读仓库快照
          ├── Evaluator      ── 引用完整性和输出质量
          └── ExecutionStore ── 轨迹、审批、反馈与决策
@@ -75,6 +76,22 @@ Workflow 每一步都会把当前 state 和 history 写入 workflow_runs。工�
 同时进入 tool_calls；超过重试次数后任务进入 failed，API 返回 task_id，用户
 仍可查询完整轨迹。
 
+## GitHub App 仓库连接
+
+私有仓库通过 `github_connections` 建立用户、installation 和单个仓库之间的
+关系。建立连接时服务先调用 GitHub 验证安装是否能读取目标仓库，验证成功后
+只保存 installation ID、规范仓库名、权限快照、状态和验证时间。
+
+每个 installation token 都限制到一个仓库，并把 Issues 与 Pull requests
+权限降为 read。token 按 installation + repository 在进程内缓存，并在过期前
+刷新；GitHub App 私钥仅来自运行时配置。私钥、App JWT 和 installation token
+均不进入数据库、任务输入、tool_calls 或错误响应。
+
+任务只保存 `github_connection_id`。API 入队和 Worker 执行时都会校验连接属于
+任务的 user_id 且状态为 active；Worker 每次开始执行时重新解析连接，因此连接
+在排队期间被断开后，任务不会继续读取仓库。当前 user_id 尚未由登录态签发，
+所以这只是数据层租户边界，不能替代生产身份认证。
+
 ## 数据证据
 
 审批的三种结果对应不同记录：
@@ -91,6 +108,7 @@ Workflow 每一步都会把当前 state 和 history 写入 workflow_runs。工�
 ## 安全约束
 
 - GitHub 适配器只实现 GET。
+- GitHub App installation token 限制到单仓库和只读权限，且不持久化。
 - Employee Definition 明确列出 allowed_tools 和 forbidden_actions。
 - Skill 执行前验证 required_tools 是否属于岗位允许集合。
 - deliver_recommendation 固定为 required，Workflow 必须暂停。
@@ -109,8 +127,8 @@ Schema 校验，并保留当前确定性 evaluator 作为交付门禁。
 
 ## 下一批技术任务
 
-1. 使用 GitHub App 安装令牌替代长期个人 Token；
-2. 增加 PostgreSQL、数据库迁移和租户隔离；
-3. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
-4. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
-5. 提供候选偏好的查看、确认、撤销、冲突和过期机制。
+1. 增加 PostgreSQL、数据库迁移、登录和可信租户隔离；
+2. 接入 Hermes，但保留 rules-v1 作为离线测试基准；
+3. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
+4. 提供候选偏好的查看、确认、撤销、冲突和过期机制；
+5. 增加 GitHub App 安装回调和 webhook 驱动的自动连接同步。

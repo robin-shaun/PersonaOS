@@ -18,6 +18,7 @@ from core.storage.models import (
     EmployeeAssignmentRecord,
     EmployeeRecord,
     FeedbackRecord,
+    GitHubConnectionRecord,
     QueueJobRecord,
     SkillRecord,
     SkillVersionRecord,
@@ -134,6 +135,120 @@ class ExecutionStore:
                     )
                 else:
                     workflow_record.definition = payload
+
+    def upsert_github_connection(
+        self,
+        *,
+        user_id: str,
+        installation_id: int,
+        repository: str,
+        account_login: str,
+        private: bool,
+        permissions: dict[str, str],
+        repository_selection: str | None,
+        verified_at: datetime,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.session() as session:
+            self._ensure_user(session, user_id)
+            connection = session.scalar(
+                select(GitHubConnectionRecord).where(
+                    GitHubConnectionRecord.user_id == user_id,
+                    GitHubConnectionRecord.provider == "github_app",
+                    func.lower(GitHubConnectionRecord.repository)
+                    == repository.casefold(),
+                )
+            )
+            if connection is None:
+                connection = GitHubConnectionRecord(
+                    id=_new_id(),
+                    user_id=user_id,
+                    provider="github_app",
+                    installation_id=installation_id,
+                    repository=repository,
+                    account_login=account_login,
+                    private=private,
+                    status="active",
+                    permissions=permissions,
+                    repository_selection=repository_selection,
+                    verified_at=verified_at,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(connection)
+            else:
+                connection.installation_id = installation_id
+                connection.repository = repository
+                connection.account_login = account_login
+                connection.private = private
+                connection.status = "active"
+                connection.permissions = permissions
+                connection.repository_selection = repository_selection
+                connection.verified_at = verified_at
+                connection.updated_at = now
+                connection.disconnected_at = None
+            session.flush()
+            return _record_dict(connection)
+
+    def get_github_connection(
+        self,
+        connection_id: str,
+        *,
+        user_id: str,
+        require_active: bool = True,
+    ) -> dict[str, Any]:
+        with self.database.session() as session:
+            connection = session.get(GitHubConnectionRecord, connection_id)
+            if connection is None or connection.user_id != user_id:
+                raise KeyError(
+                    f"GitHubConnectionRecord not found: {connection_id}"
+                )
+            if require_active and connection.status != "active":
+                raise ValueError(
+                    f"GitHub connection {connection_id} is disconnected"
+                )
+            return _record_dict(connection)
+
+    def list_github_connections(
+        self,
+        *,
+        user_id: str,
+        include_disconnected: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self.database.session() as session:
+            statement = select(GitHubConnectionRecord).where(
+                GitHubConnectionRecord.user_id == user_id
+            )
+            if not include_disconnected:
+                statement = statement.where(
+                    GitHubConnectionRecord.status == "active"
+                )
+            records = session.scalars(
+                statement.order_by(
+                    GitHubConnectionRecord.repository,
+                    GitHubConnectionRecord.created_at,
+                )
+            )
+            return [_record_dict(item) for item in records]
+
+    def disconnect_github_connection(
+        self,
+        connection_id: str,
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.session() as session:
+            connection = session.get(GitHubConnectionRecord, connection_id)
+            if connection is None or connection.user_id != user_id:
+                raise KeyError(
+                    f"GitHubConnectionRecord not found: {connection_id}"
+                )
+            if connection.status == "active":
+                connection.status = "disconnected"
+                connection.disconnected_at = now
+                connection.updated_at = now
+            return _record_dict(connection)
 
     def create_task(
         self,

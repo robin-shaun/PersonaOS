@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -12,9 +12,12 @@ class Settings:
     employee_config_dir: Path
     skill_config_dir: Path
     workflow_config_dir: Path
-    github_token: str | None
+    github_token: str | None = field(repr=False)
     github_api_url: str
     runtime_name: str
+    github_api_version: str = "2026-03-10"
+    github_app_id: str | None = None
+    github_app_private_key: str | None = field(default=None, repr=False)
     api_host: str = "127.0.0.1"
     api_port: int = 18110
     queue_max_attempts: int = 3
@@ -29,6 +32,12 @@ class Settings:
         project_root = (base_dir or Path(__file__).resolve().parents[1]).resolve()
         default_db = f"sqlite:///{project_root / 'var' / 'digital_employee.db'}"
         configured_db = os.getenv("DIGITAL_EMPLOYEE_DATABASE_URL") or default_db
+        github_app_id = (os.getenv("GITHUB_APP_ID") or "").strip() or None
+        github_app_private_key = _github_app_private_key(project_root)
+        if bool(github_app_id) != bool(github_app_private_key):
+            raise ValueError(
+                "GITHUB_APP_ID and a GitHub App private key must be configured together"
+            )
         return cls(
             base_dir=project_root,
             database_url=configured_db,
@@ -38,6 +47,11 @@ class Settings:
             github_token=os.getenv("GITHUB_TOKEN") or None,
             github_api_url=os.getenv("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
             runtime_name=os.getenv("DIGITAL_EMPLOYEE_RUNTIME", "rules"),
+            github_api_version=os.getenv(
+                "GITHUB_API_VERSION", "2026-03-10"
+            ).strip(),
+            github_app_id=github_app_id,
+            github_app_private_key=github_app_private_key,
             api_host=os.getenv("DIGITAL_EMPLOYEE_API_HOST", "127.0.0.1"),
             api_port=_env_int(
                 "DIGITAL_EMPLOYEE_API_PORT",
@@ -78,6 +92,34 @@ class Settings:
                 minimum=0.01,
             ),
         )
+
+    @property
+    def github_app_configured(self) -> bool:
+        return bool(self.github_app_id and self.github_app_private_key)
+
+
+def _github_app_private_key(project_root: Path) -> str | None:
+    inline_key = os.getenv("GITHUB_APP_PRIVATE_KEY")
+    key_path = (os.getenv("GITHUB_APP_PRIVATE_KEY_PATH") or "").strip()
+    if inline_key and key_path:
+        raise ValueError(
+            "Configure only one of GITHUB_APP_PRIVATE_KEY or "
+            "GITHUB_APP_PRIVATE_KEY_PATH"
+        )
+    if inline_key:
+        normalized = inline_key.strip()
+        if "\\n" in normalized and "\n" not in normalized:
+            normalized = normalized.replace("\\n", "\n")
+        return normalized or None
+    if not key_path:
+        return None
+    path = Path(key_path).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError as exc:
+        raise ValueError(f"Unable to read GITHUB_APP_PRIVATE_KEY_PATH: {path}") from exc
 
 
 def _env_int(

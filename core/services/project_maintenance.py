@@ -9,6 +9,7 @@ from adapters.github.client import normalize_repository
 from adapters.github.models import GitHubGateway
 from core.agents.employee import EmployeeCatalog, EmployeeDefinition
 from core.evaluation.task_eval import ProjectMaintenanceEvaluator
+from core.services.github_connections import GitHubConnectionService
 from core.skills.executor import SkillExecutor
 from core.storage.repository import ExecutionStore
 from core.workflows.engine import StepResult, WorkflowEngine, WorkflowExecutionError
@@ -21,7 +22,8 @@ from core.workflows.models import (
 
 @dataclass(frozen=True, slots=True)
 class ProjectMaintenanceCommand:
-    repository: str
+    repository: str | None = None
+    github_connection_id: str | None = None
     employee_id: str = "github-maintainer-001"
     user_id: str = "local-user"
     workflow_name: str = "daily-project-maintenance"
@@ -54,6 +56,7 @@ class ProjectMaintenanceService:
         workflows: WorkflowCatalog,
         skills: SkillExecutor,
         github: GitHubGateway,
+        github_connections: GitHubConnectionService,
         evaluator: ProjectMaintenanceEvaluator,
         queue_max_attempts: int = 3,
     ) -> None:
@@ -62,6 +65,7 @@ class ProjectMaintenanceService:
         self._workflows = workflows
         self._skills = skills
         self._github = github
+        self._github_connections = github_connections
         self._evaluator = evaluator
         self._queue_max_attempts = max(1, queue_max_attempts)
 
@@ -71,7 +75,7 @@ class ProjectMaintenanceService:
         *,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        repository, employee, workflow, task_input = self._resolve_command(command)
+        repository, _, employee, workflow, task_input = self._resolve_command(command)
         try:
             submission = self._store.create_queued_task(
                 employee_id=employee.employee_id,
@@ -98,7 +102,9 @@ class ProjectMaintenanceService:
         self,
         command: ProjectMaintenanceCommand,
     ) -> dict[str, Any]:
-        repository, employee, workflow, task_input = self._resolve_command(command)
+        repository, github, employee, workflow, task_input = self._resolve_command(
+            command
+        )
         task_id = self._store.create_task(
             employee_id=employee.employee_id,
             user_id=command.user_id,
@@ -108,6 +114,7 @@ class ProjectMaintenanceService:
         return await self._run_existing_task(
             task_id=task_id,
             repository=repository,
+            github=github,
             employee=employee,
             workflow=workflow,
             user_id=command.user_id,
@@ -120,16 +127,18 @@ class ProjectMaintenanceService:
             raise TaskCancellationRequested(task_id)
         task_input = task["input"]
         command = ProjectMaintenanceCommand(
-            repository=task_input["repository"],
+            repository=task_input.get("repository"),
+            github_connection_id=task_input.get("github_connection_id"),
             employee_id=task["employee_id"],
             user_id=task["user_id"],
             workflow_name=task["workflow_name"],
             max_items=int(task_input["max_items"]),
         )
-        repository, employee, workflow, _ = self._resolve_command(command)
+        repository, github, employee, workflow, _ = self._resolve_command(command)
         return await self._run_existing_task(
             task_id=task_id,
             repository=repository,
+            github=github,
             employee=employee,
             workflow=workflow,
             user_id=command.user_id,
@@ -141,11 +150,24 @@ class ProjectMaintenanceService:
         command: ProjectMaintenanceCommand,
     ) -> tuple[
         str,
+        GitHubGateway,
         EmployeeDefinition,
         WorkflowDefinition,
         dict[str, Any],
     ]:
-        repository = normalize_repository(command.repository)
+        if command.github_connection_id:
+            repository, github = self._github_connections.resolve_gateway(
+                command.github_connection_id,
+                user_id=command.user_id,
+                repository=command.repository,
+            )
+        elif command.repository:
+            repository = normalize_repository(command.repository)
+            github = self._github
+        else:
+            raise ValueError(
+                "repository or github_connection_id is required"
+            )
         if not 1 <= command.max_items <= 100:
             raise ValueError("max_items must be between 1 and 100")
         employee = self._employees.get(command.employee_id)
@@ -153,12 +175,18 @@ class ProjectMaintenanceService:
         self._validate_assignment(employee, workflow)
         return (
             repository,
+            github,
             employee,
             workflow,
             {
                 "repository": repository,
                 "max_items": command.max_items,
                 "read_only": True,
+                **(
+                    {"github_connection_id": command.github_connection_id}
+                    if command.github_connection_id
+                    else {}
+                ),
             },
         )
 
@@ -167,6 +195,7 @@ class ProjectMaintenanceService:
         *,
         task_id: str,
         repository: str,
+        github: GitHubGateway,
         employee: EmployeeDefinition,
         workflow: WorkflowDefinition,
         user_id: str,
@@ -203,6 +232,7 @@ class ProjectMaintenanceService:
             task_id=task_id,
             task_run_id=task_run_id,
             repository=repository,
+            github=github,
             max_items=max_items,
         )
         engine = WorkflowEngine(handlers)
@@ -265,6 +295,7 @@ class ProjectMaintenanceService:
         task_id: str,
         task_run_id: str,
         repository: str,
+        github: GitHubGateway,
         max_items: int,
     ) -> dict[str, Any]:
         async def collect_repository(
@@ -278,7 +309,7 @@ class ProjectMaintenanceService:
                 "operation": "read",
             }
             try:
-                snapshot = await self._github.get_repository_snapshot(
+                snapshot = await github.get_repository_snapshot(
                     repository,
                     max_items=max_items,
                 )
