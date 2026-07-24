@@ -13,6 +13,7 @@ from core.agents.runtime import AgentRuntime
 from core.config import Settings
 from core.evaluation.task_eval import ProjectMaintenanceEvaluator
 from core.services.github_connections import GitHubConnectionService
+from core.services.personalization import PersonalizationService
 from core.services.project_maintenance import (
     ApprovalService,
     ProjectMaintenanceService,
@@ -34,6 +35,7 @@ class Container:
     workflows: WorkflowCatalog
     runtime: AgentRuntime
     github_connections: GitHubConnectionService
+    personalization: PersonalizationService
     project_maintenance: ProjectMaintenanceService
     approvals: ApprovalService
 
@@ -105,6 +107,7 @@ def build_container(
         store=store,
         provider=github_app,
     )
+    personalization = PersonalizationService(store)
     skill_executor = SkillExecutor(skill_registry, runtime)
     project_maintenance = ProjectMaintenanceService(
         store=store,
@@ -114,6 +117,7 @@ def build_container(
         github=github,
         github_connections=github_connections,
         evaluator=ProjectMaintenanceEvaluator(),
+        personal_context=personalization,
         queue_max_attempts=settings.queue_max_attempts,
     )
     return Container(
@@ -125,6 +129,7 @@ def build_container(
         workflows=workflows,
         runtime=runtime,
         github_connections=github_connections,
+        personalization=personalization,
         project_maintenance=project_maintenance,
-        approvals=ApprovalService(store),
+        approvals=ApprovalService(store, personalization),
     )

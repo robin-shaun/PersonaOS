@@ -28,7 +28,10 @@
          ├── GitHubConnectionService ── 用户、安装与仓库授权关系
          ├── GitHubGateway  ── 只读仓库快照
          ├── Evaluator      ── 引用完整性和输出质量
-         └── ExecutionStore ── 轨迹、审批、反馈与决策
+         ├── PersonalizationService
+         │       ├── memory_sources ── 不可混淆的行为来源
+         │       └── preferences    ── 候选、审核与运行时上下文
+         └── ExecutionStore ── 轨迹、审批、反馈、决策与个人化证据
 
 业务服务不依赖 httpx、Hermes SDK 或 GitHub 响应对象。所有外部对象先在
 adapter 中转换为稳定领域模型。
@@ -107,12 +110,56 @@ Workflow 每一步都会把当前 state 和 history 写入 workflow_runs。工�
 这使后续偏好抽取可以区分模型原始输出、用户修改和最终决策，不需要从最终稿
 反推发生过什么。
 
+## Personal Layer 边界
+
+当前版本不尝试模拟用户人格，只建立数字员工向数字分身演进所需的证据闭环：
+
+    feedback / decision_record
+              │
+              ▼
+        memory_sources
+       （来源与时间固定）
+              │
+              ▼
+      candidate preference
+    （规则、置信度、证据数）
+              │
+       用户确认 / 拒绝
+              │
+              ▼
+    confirmed preference
+              │
+              ▼
+       Personal Context
+              │
+              ▼
+      公共 Skill + 个人规则
+
+`memory_sources` 使用 `source_type + source_id` 指向原始 feedback 或
+decision_record，并保存本次抽取需要的结构化差异。重复扫描同一来源是幂等的。
+`preference_evidence` 把候选规则连接到一个或多个来源，置信度按独立证据权重
+累积，并上限限制为 0.99。当前抽取器只做可解释的确定性处理：
+
+- 用户明确写出的修改、拒绝或反馈理由作为候选规则；
+- 没有理由的用户修改保存 JSON 字段级差异，并形成低置信度候选观察；
+- 决策记录先作为行为来源保留，不从一次普通“接受”中推断人格。
+
+偏好状态为 `candidate`、`confirmed`、`rejected` 或 `revoked`。所有状态变化写入
+`preference_reviews`；确认时可设置过期时间。业务 Agent 通过
+`PersonalContextProvider` 获取个人上下文，只返回 `confirmed` 且未过期的偏好。
+`PersonalContext` 使用版本化结构，并提前保留 `identity_profile`、`memories` 和
+`preferences` 三个独立字段；当前前两项为空，后续补充身份和记忆时不需要改变
+AgentRuntime 或业务 Workflow 的调用边界。
+候选偏好永远不会自动改变公共 Skill，也不会静默代表用户作出决定。
+
 ## 安全约束
 
 - GitHub 适配器只实现 GET。
 - GitHub App installation token 限制到单仓库和只读权限，且不持久化。
 - Employee Definition 明确列出 allowed_tools 和 forbidden_actions。
 - Skill 执行前验证 required_tools 是否属于岗位允许集合。
+- Personal Context 只应用用户已确认且未过期的偏好，候选和撤销记录仅供审核。
+- 偏好详情和审核操作必须同时匹配记录所属 user_id。
 - deliver_recommendation 固定为 required，Workflow 必须暂停。
 - 每份报告声明 read_only 和 github_mutations_performed。
 - 推荐项的 Issue 编号与证据链接必须存在于本次仓库快照中，否则质量门禁失败。
@@ -138,8 +185,9 @@ Runs 提交、状态与停止能力，再确认 API Server 没有启用任何 to
 
 ## 下一批技术任务
 
-1. 增加网页管理端，覆盖仓库连接、任务轨迹、审批和运行时状态；
+1. 增加网页管理端，覆盖仓库连接、任务轨迹、审批、偏好审核和运行时状态；
 2. 增加 PostgreSQL、数据库迁移、登录和可信租户隔离；
-3. 从 user_edit 与 decision_records 生成带来源和置信度的候选偏好；
-4. 提供候选偏好的查看、确认、撤销、冲突和过期机制；
-5. 增加 GitHub App 安装回调和 webhook 驱动的自动连接同步。
+3. 增加相似偏好的语义合并、冲突检测和证据衰减，替代当前精确规则聚合；
+4. 增加 Identity Profile、情景记忆检索和由用户确认的语义记忆归纳；
+5. 增加组织 Skill Override 与个人 Skill Override 的版本化组合；
+6. 增加 GitHub App 安装回调和 webhook 驱动的自动连接同步。

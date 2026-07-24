@@ -9,7 +9,10 @@ from adapters.github.client import normalize_repository
 from adapters.github.models import GitHubGateway
 from core.agents.employee import EmployeeCatalog, EmployeeDefinition
 from core.evaluation.task_eval import ProjectMaintenanceEvaluator
+from core.identity.context import PersonalContextProvider
+from core.identity.models import PersonalContext
 from core.services.github_connections import GitHubConnectionService
+from core.services.personalization import PersonalizationService
 from core.skills.executor import SkillExecutor
 from core.storage.repository import ExecutionStore
 from core.workflows.engine import StepResult, WorkflowEngine, WorkflowExecutionError
@@ -58,6 +61,7 @@ class ProjectMaintenanceService:
         github: GitHubGateway,
         github_connections: GitHubConnectionService,
         evaluator: ProjectMaintenanceEvaluator,
+        personal_context: PersonalContextProvider | None = None,
         queue_max_attempts: int = 3,
     ) -> None:
         self._store = store
@@ -67,6 +71,7 @@ class ProjectMaintenanceService:
         self._github = github
         self._github_connections = github_connections
         self._evaluator = evaluator
+        self._personal_context = personal_context
         self._queue_max_attempts = max(1, queue_max_attempts)
 
     def enqueue(
@@ -201,6 +206,20 @@ class ProjectMaintenanceService:
         user_id: str,
         max_items: int,
     ) -> dict[str, Any]:
+        personal_context_model = (
+            self._personal_context.for_task(
+                user_id=user_id,
+                context=workflow.name,
+            )
+            if self._personal_context is not None
+            else PersonalContext(
+                user_id=user_id,
+                context=workflow.name,
+            )
+        )
+        personal_context = personal_context_model.model_dump(
+            mode="json"
+        )
         plan = [
             {
                 "step_id": step.id,
@@ -218,7 +237,8 @@ class ProjectMaintenanceService:
                 "max_items": max_items,
                 "employee_id": employee.employee_id,
                 "user_id": user_id,
-            }
+            },
+            "personalization": personal_context,
         }
         workflow_run_id = self._store.create_workflow_run(
             task_run_id=task_run_id,
@@ -235,6 +255,7 @@ class ProjectMaintenanceService:
             repository=repository,
             github=github,
             max_items=max_items,
+            personal_context=personal_context,
         )
         engine = WorkflowEngine(handlers)
 
@@ -299,6 +320,7 @@ class ProjectMaintenanceService:
         repository: str,
         github: GitHubGateway,
         max_items: int,
+        personal_context: dict[str, Any],
     ) -> dict[str, Any]:
         async def collect_repository(
             _: dict[str, Any],
@@ -358,6 +380,7 @@ class ProjectMaintenanceService:
                             "task_run_id": task_run_id,
                             "user_id": user_id,
                         },
+                        "personalization": personal_context,
                     },
                 )
                 return StepResult(
@@ -415,6 +438,13 @@ class ProjectMaintenanceService:
                     },
                     "read_only": True,
                     "github_mutations_performed": 0,
+                    "personalization": {
+                        "policy": personal_context["policy"],
+                        "applied_preference_ids": [
+                            item["preference_id"]
+                            for item in personal_context["preferences"]
+                        ],
+                    },
                 },
             }
             artifact_id = self._store.create_artifact(
@@ -467,8 +497,13 @@ class ProjectMaintenanceService:
 
 
 class ApprovalService:
-    def __init__(self, store: ExecutionStore) -> None:
+    def __init__(
+        self,
+        store: ExecutionStore,
+        personalization: PersonalizationService | None = None,
+    ) -> None:
         self._store = store
+        self._personalization = personalization
 
     def decide(
         self,
@@ -484,4 +519,12 @@ class ApprovalService:
             edited_output=edited_output,
             reason=reason,
         )
-        return self._store.get_task_bundle(approval["task_id"])
+        learning = (
+            self._personalization.learn_from_task(approval["task_id"])
+            if self._personalization is not None
+            else None
+        )
+        bundle = self._store.get_task_bundle(approval["task_id"])
+        if learning is not None:
+            bundle["preference_learning"] = learning
+        return bundle

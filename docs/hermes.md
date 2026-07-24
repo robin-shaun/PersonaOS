@@ -133,6 +133,9 @@ Hermes 不可用、API key 错误、Runs API 版本不兼容、输出不是所�
 ## 当前记忆边界
 
 适配器为每次 Skill 生成独立、可关联的 session ID，但暂不发送
-`X-Hermes-Session-Key`，因此没有启用 Hermes 长期个人记忆。个人记忆将在后续
-由 AI Colleague 的来源、同意、冲突和撤销机制统一控制，避免在两个系统中形成
-无法审计的平行记忆。
+`X-Hermes-Session-Key`，因此没有启用 Hermes 长期个人记忆。AI Colleague
+只会把自己管理的、已有来源且经用户确认的偏好放入
+`context.personalization`；候选、拒绝、撤销或过期偏好不会发送。Hermes
+系统指令把这些偏好限制为低优先级工作指导，它们不能授予工具或副作用权限。
+后续个人记忆仍由 AI Colleague 的来源、同意、冲突和撤销机制统一控制，避免
+在两个系统中形成无法审计的平行记忆。

@@ -28,9 +28,14 @@ Worker 与 Hermes 都运行在服务端，模型密钥不会下发到浏览器�
           ↓
     产物、修改、反馈与决策记录
 
-当前 0.5.0 版本已集成 Hermes Agent API Server，也保留确定性的 `rules-v1`
+当前 0.6.0 版本已集成 Hermes Agent API Server，也保留确定性的 `rules-v1`
 作为默认离线运行时。业务层只依赖 `AgentRuntime`，切换 Hermes 不需要重写
 Skill、Workflow、审批或持久化代码。
+
+0.6.0 同时加入了第一段 Personal Layer：系统会把用户修改、拒绝和显式反馈
+保存为带来源的行为证据，并生成待用户审核的候选偏好。候选偏好不会影响任务；
+只有用户主动确认且尚未过期的偏好，才会以独立上下文叠加到公共岗位 Skill 上。
+公共 Skill 和组织规则不会因个人反馈而被直接改写。
 
 ## 快速启动
 
@@ -185,6 +190,43 @@ curl -X POST http://127.0.0.1:18110/api/v1/approvals/APPROVAL_ID/decision \
 edited_output 字段中。系统会保留版本 1 原稿、版本 2 修改稿、修改反馈和
 一条 decision_record。拒绝时使用 rejected，原提案仍保留用于审计。
 
+审批完成后，服务会自动从本次 feedback 和 decision_record 中同步行为来源。
+带理由的用户修改、拒绝或显式反馈会形成候选偏好；无理由的修改会保留结构化
+字段差异，并以较低置信度形成候选观察。查看候选：
+
+~~~bash
+curl 'http://127.0.0.1:18110/api/v1/users/shaun/preferences?status=candidate'
+~~~
+
+查看某条偏好的完整来源：
+
+~~~bash
+curl \
+  'http://127.0.0.1:18110/api/v1/preferences/PREFERENCE_ID?user_id=shaun'
+~~~
+
+确认后才允许后续任务使用：
+
+~~~bash
+curl -X POST \
+  http://127.0.0.1:18110/api/v1/preferences/PREFERENCE_ID/review \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "user_id": "shaun",
+    "action": "confirm",
+    "reason": "这条规则适用于后续项目维护工作"
+  }'
+~~~
+
+`action` 还支持 `reject` 和 `revoke`。确认时可以传入 ISO 8601 格式的
+`expires_at`；过期偏好会继续保留审计记录，但不会进入运行时上下文。历史数据
+可通过幂等接口重新扫描：
+
+~~~bash
+curl -X POST \
+  'http://127.0.0.1:18110/api/v1/users/shaun/preferences/learn'
+~~~
+
 也可以直接从命令行运行一次：
 
 ~~~bash
@@ -220,6 +262,11 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | GET | /api/v1/runtime/status | 检查当前 Agent 运行时及 Hermes 工具边界 |
 | GET | /api/v1/employees | 查看岗位定义 |
 | GET | /api/v1/skills | 查看已注册 Skill |
+| GET | /api/v1/users/{user_id}/memory-sources | 查看带来源的行为证据 |
+| GET | /api/v1/users/{user_id}/preferences | 查看候选或已审核偏好 |
+| POST | /api/v1/users/{user_id}/preferences/learn | 幂等扫描历史行为证据 |
+| GET | /api/v1/preferences/{preference_id} | 查看偏好、证据和审核轨迹 |
+| POST | /api/v1/preferences/{preference_id}/review | 确认、拒绝或撤销偏好 |
 | POST | /api/v1/github/connections | 验证并保存 GitHub App 仓库连接 |
 | GET | /api/v1/github/connections | 按用户查看仓库连接 |
 | DELETE | /api/v1/github/connections/{connection_id} | 断开仓库连接 |
@@ -232,8 +279,9 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | POST | /api/v1/tasks/{task_id}/feedback | 追加评分与文字反馈 |
 
 任务详情一次返回 task_runs、queue_jobs、task_events、tool_calls、
-workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
-调试和后续偏好学习。`task_events` 会记录取消请求、取消完成和每次执行超时。
+workflow_runs、approvals、feedback、artifacts、decision_records、
+memory_sources 和 preference_candidates，便于调试和后续偏好学习。
+`task_events` 会记录取消请求、取消完成和每次执行超时。
 
 ## 代码结构
 
@@ -245,6 +293,7 @@ workflow_runs、approvals、feedback、artifacts 和 decision_records，便于
       skills/              Skill 注册和权限检查
       workflows/           重试、条件、暂停与检查点
       evaluation/          事实引用与交付质量检查
+      identity/            偏好证据提取与 Personal Context 接口
       services/            项目维护和审批业务流程
       storage/             SQLite / SQLAlchemy 数据模型
     adapters/

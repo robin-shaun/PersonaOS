@@ -224,7 +224,7 @@ class GitHubAppClient:
         return {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": self._api_version,
-            "User-Agent": "digital-employee-mvp/0.4",
+            "User-Agent": "digital-employee-mvp/0.6",
         }
 
     async def _request_json(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -59,7 +60,7 @@ class ProjectMaintenanceTaskCreate(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def validate_repository_source(self) -> "ProjectMaintenanceTaskCreate":
+    def validate_repository_source(self) -> ProjectMaintenanceTaskCreate:
         if self.repository is None and self.github_connection_id is None:
             raise ValueError(
                 "repository or github_connection_id is required"
@@ -99,7 +100,7 @@ class ApprovalDecisionRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
-    def validate_edit(self) -> "ApprovalDecisionRequest":
+    def validate_edit(self) -> ApprovalDecisionRequest:
         if self.decision == "approved_with_edits" and self.edited_output is None:
             raise ValueError("edited_output is required for approved_with_edits")
         return self
@@ -117,3 +118,24 @@ class TaskCancellationRequest(BaseModel):
         max_length=2000,
     )
     requested_by: str = Field(default="api", min_length=1, max_length=200)
+
+
+class PreferenceReviewRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+    action: Literal["confirm", "reject", "revoke"]
+    reason: str | None = Field(default=None, max_length=4000)
+    expires_at: datetime | None = None
+
+    @field_validator("user_id")
+    @classmethod
+    def normalize_preference_user_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("user_id must not be empty")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_expiration(self) -> PreferenceReviewRequest:
+        if self.expires_at is not None and self.action != "confirm":
+            raise ValueError("expires_at is only valid when confirming a preference")
+        return self

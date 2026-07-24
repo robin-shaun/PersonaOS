@@ -11,6 +11,7 @@ from apps.api.schemas import (
     ApprovalDecisionRequest,
     FeedbackCreate,
     GitHubConnectionCreate,
+    PreferenceReviewRequest,
     ProjectMaintenanceTaskCreate,
     TaskCancellationRequest,
 )
@@ -27,7 +28,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="Digital Employee MVP",
-        version="0.5.0",
+        version="0.6.0",
         description=(
             "Approval-first, read-only GitHub project maintenance employee. "
             "Every result includes evidence and an execution trace."
@@ -74,6 +75,92 @@ def create_app(container: Container | None = None) -> FastAPI:
     @app.get("/api/v1/skills")
     async def list_skills() -> list[dict[str, Any]]:
         return container.store.list_skills()
+
+    @app.get("/api/v1/users/{user_id}/memory-sources")
+    async def list_memory_sources(
+        user_id: str,
+        source_type: str | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        return container.store.list_memory_sources(
+            user_id=user_id,
+            source_type=source_type,
+            limit=limit,
+        )
+
+    @app.get("/api/v1/users/{user_id}/preferences")
+    async def list_preferences(
+        user_id: str,
+        preference_status: str | None = Query(default=None, alias="status"),
+        context: str | None = None,
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.store.list_preferences(
+                user_id=user_id,
+                status=preference_status,
+                context=context,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+    @app.post("/api/v1/users/{user_id}/preferences/learn")
+    async def learn_preferences(
+        user_id: str,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return container.personalization.learn(
+                user_id=user_id,
+                task_id=task_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/preferences/{preference_id}")
+    async def get_preference(
+        preference_id: str,
+        user_id: str = Query(min_length=1, max_length=64),
+    ) -> dict[str, Any]:
+        try:
+            return container.store.get_preference_bundle(
+                preference_id,
+                user_id=user_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post("/api/v1/preferences/{preference_id}/review")
+    async def review_preference(
+        preference_id: str,
+        payload: PreferenceReviewRequest,
+    ) -> dict[str, Any]:
+        try:
+            return container.store.review_preference(
+                preference_id,
+                user_id=payload.user_id,
+                action=payload.action,
+                reason=payload.reason,
+                expires_at=payload.expires_at,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
 
     @app.get("/api/v1/runtime/status")
     async def runtime_status() -> dict[str, Any]:
@@ -280,14 +367,13 @@ def create_app(container: Container | None = None) -> FastAPI:
     async def create_feedback(
         task_id: str,
         payload: FeedbackCreate,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         try:
-            feedback_id = container.store.add_feedback(
+            return container.personalization.add_feedback(
                 task_id,
                 comment=payload.comment,
                 rating=payload.rating,
             )
-            return {"feedback_id": feedback_id, "task_id": task_id}
         except KeyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

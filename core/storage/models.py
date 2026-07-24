@@ -4,10 +4,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
-    JSON,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -330,6 +331,110 @@ class DecisionRecord(Base):
     user_choice: Mapped[str] = mapped_column(String(60))
     user_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_outcome: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class MemorySourceRecord(Base):
+    __tablename__ = "memory_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "source_type",
+            "source_id",
+            name="uq_memory_source_provenance",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id"), index=True, nullable=True
+    )
+    source_type: Mapped[str] = mapped_column(String(80), index=True)
+    source_id: Mapped[str] = mapped_column(String(100), index=True)
+    source_kind: Mapped[str] = mapped_column(String(80), index=True)
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class PreferenceRecord(Base):
+    __tablename__ = "preferences"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "fingerprint",
+            name="uq_preference_user_fingerprint",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    context: Mapped[str] = mapped_column(String(200), index=True)
+    category: Mapped[str] = mapped_column(String(80), index=True)
+    rule: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(
+        String(40), default="candidate", index=True, nullable=False
+    )
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    evidence_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_evidenced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class PreferenceEvidenceRecord(Base):
+    __tablename__ = "preference_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "preference_id",
+            "memory_source_id",
+            name="uq_preference_memory_source",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    preference_id: Mapped[str] = mapped_column(
+        ForeignKey("preferences.id"), index=True
+    )
+    memory_source_id: Mapped[str] = mapped_column(
+        ForeignKey("memory_sources.id"), index=True
+    )
+    extraction_method: Mapped[str] = mapped_column(String(100))
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class PreferenceReviewRecord(Base):
+    __tablename__ = "preference_reviews"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    preference_id: Mapped[str] = mapped_column(
+        ForeignKey("preferences.id"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    previous_status: Mapped[str] = mapped_column(String(40))
+    new_status: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

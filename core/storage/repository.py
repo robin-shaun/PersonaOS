@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from math import prod
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +20,10 @@ from core.storage.models import (
     EmployeeRecord,
     FeedbackRecord,
     GitHubConnectionRecord,
+    MemorySourceRecord,
+    PreferenceEvidenceRecord,
+    PreferenceRecord,
+    PreferenceReviewRecord,
     QueueJobRecord,
     SkillRecord,
     SkillVersionRecord,
@@ -1485,6 +1490,310 @@ class ExecutionStore:
             )
         return feedback_id
 
+    def list_task_ids_for_user(self, user_id: str) -> list[str]:
+        with self.database.session() as session:
+            return list(
+                session.scalars(
+                    select(TaskRecord.id)
+                    .where(TaskRecord.user_id == user_id)
+                    .order_by(TaskRecord.created_at)
+                )
+            )
+
+    def upsert_memory_source(
+        self,
+        *,
+        user_id: str,
+        task_id: str | None,
+        source_type: str,
+        source_id: str,
+        source_kind: str,
+        content: dict[str, Any],
+        captured_at: datetime,
+    ) -> dict[str, Any]:
+        with self.database.session() as session:
+            self._required(session, UserRecord, user_id)
+            if task_id is not None:
+                task = self._required(session, TaskRecord, task_id)
+                if task.user_id != user_id:
+                    raise KeyError(f"TaskRecord not found: {task_id}")
+            source = session.scalar(
+                select(MemorySourceRecord).where(
+                    MemorySourceRecord.user_id == user_id,
+                    MemorySourceRecord.source_type == source_type,
+                    MemorySourceRecord.source_id == source_id,
+                )
+            )
+            created = source is None
+            if source is None:
+                source = MemorySourceRecord(
+                    id=_new_id(),
+                    user_id=user_id,
+                    task_id=task_id,
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_kind=source_kind,
+                    content=content,
+                    captured_at=captured_at,
+                )
+                session.add(source)
+                session.flush()
+            return {
+                "source": _record_dict(source),
+                "created": created,
+            }
+
+    def upsert_preference_candidate(
+        self,
+        *,
+        user_id: str,
+        context: str,
+        category: str,
+        rule: str,
+        fingerprint: str,
+        memory_source_id: str,
+        extraction_method: str,
+        weight: float,
+    ) -> dict[str, Any]:
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError("preference evidence weight must be between 0 and 1")
+        now = utc_now()
+        with self.database.session() as session:
+            source = self._required(
+                session, MemorySourceRecord, memory_source_id
+            )
+            if source.user_id != user_id:
+                raise KeyError(
+                    f"MemorySourceRecord not found: {memory_source_id}"
+                )
+            preference = session.scalar(
+                select(PreferenceRecord).where(
+                    PreferenceRecord.user_id == user_id,
+                    PreferenceRecord.fingerprint == fingerprint,
+                )
+            )
+            created = preference is None
+            if preference is None:
+                preference = PreferenceRecord(
+                    id=_new_id(),
+                    user_id=user_id,
+                    context=context,
+                    category=category,
+                    rule=rule,
+                    fingerprint=fingerprint,
+                    status="candidate",
+                    confidence=0.0,
+                    evidence_count=0,
+                    last_evidenced_at=source.captured_at,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(preference)
+                session.flush()
+
+            evidence = session.scalar(
+                select(PreferenceEvidenceRecord).where(
+                    PreferenceEvidenceRecord.preference_id == preference.id,
+                    PreferenceEvidenceRecord.memory_source_id == memory_source_id,
+                )
+            )
+            evidence_added = evidence is None
+            if evidence is None:
+                session.add(
+                    PreferenceEvidenceRecord(
+                        id=_new_id(),
+                        preference_id=preference.id,
+                        memory_source_id=memory_source_id,
+                        extraction_method=extraction_method,
+                        weight=weight,
+                    )
+                )
+                session.flush()
+                weights = list(
+                    session.scalars(
+                        select(PreferenceEvidenceRecord.weight).where(
+                            PreferenceEvidenceRecord.preference_id
+                            == preference.id
+                        )
+                    )
+                )
+                preference.evidence_count = len(weights)
+                preference.confidence = round(
+                    min(0.99, 1.0 - prod(1.0 - item for item in weights)),
+                    4,
+                )
+                preference.last_evidenced_at = max(
+                    preference.last_evidenced_at,
+                    source.captured_at,
+                )
+                preference.updated_at = now
+                session.flush()
+
+            return {
+                "preference": self._preference_dict(preference),
+                "created": created,
+                "evidence_added": evidence_added,
+            }
+
+    def list_memory_sources(
+        self,
+        *,
+        user_id: str,
+        source_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self.database.session() as session:
+            statement = select(MemorySourceRecord).where(
+                MemorySourceRecord.user_id == user_id
+            )
+            if source_type is not None:
+                statement = statement.where(
+                    MemorySourceRecord.source_type == source_type
+                )
+            records = session.scalars(
+                statement.order_by(MemorySourceRecord.captured_at.desc()).limit(
+                    max(1, min(limit, 500))
+                )
+            )
+            return [_record_dict(item) for item in records]
+
+    def list_preferences(
+        self,
+        *,
+        user_id: str,
+        status: str | None = None,
+        context: str | None = None,
+    ) -> list[dict[str, Any]]:
+        allowed_statuses = {"candidate", "confirmed", "rejected", "revoked"}
+        if status is not None and status not in allowed_statuses:
+            raise ValueError(f"Unsupported preference status: {status}")
+        with self.database.session() as session:
+            statement = select(PreferenceRecord).where(
+                PreferenceRecord.user_id == user_id
+            )
+            if status is not None:
+                statement = statement.where(PreferenceRecord.status == status)
+            if context is not None:
+                statement = statement.where(
+                    PreferenceRecord.context.in_([context, "global"])
+                )
+            records = session.scalars(
+                statement.order_by(
+                    PreferenceRecord.updated_at.desc(),
+                    PreferenceRecord.id,
+                )
+            )
+            return [self._preference_dict(item) for item in records]
+
+    def list_confirmed_preferences(
+        self,
+        *,
+        user_id: str,
+        context: str,
+    ) -> list[dict[str, Any]]:
+        now = utc_now()
+        with self.database.session() as session:
+            records = session.scalars(
+                select(PreferenceRecord)
+                .where(
+                    PreferenceRecord.user_id == user_id,
+                    PreferenceRecord.status == "confirmed",
+                    PreferenceRecord.context.in_([context, "global"]),
+                    or_(
+                        PreferenceRecord.expires_at.is_(None),
+                        PreferenceRecord.expires_at > now,
+                    ),
+                )
+                .order_by(
+                    PreferenceRecord.context,
+                    PreferenceRecord.category,
+                    PreferenceRecord.created_at,
+                )
+            )
+            return [self._preference_dict(item) for item in records]
+
+    def get_preference_bundle(
+        self,
+        preference_id: str,
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        with self.database.session() as session:
+            preference = self._required(
+                session, PreferenceRecord, preference_id
+            )
+            if preference.user_id != user_id:
+                raise KeyError(
+                    f"PreferenceRecord not found: {preference_id}"
+                )
+            return self._preference_bundle(session, preference)
+
+    def review_preference(
+        self,
+        preference_id: str,
+        *,
+        user_id: str,
+        action: str,
+        reason: str | None,
+        expires_at: datetime | None,
+    ) -> dict[str, Any]:
+        targets = {
+            "confirm": "confirmed",
+            "reject": "rejected",
+            "revoke": "revoked",
+        }
+        if action not in targets:
+            raise ValueError(f"Unsupported preference review action: {action}")
+        now = utc_now()
+        if expires_at is not None:
+            comparable_expiry = (
+                expires_at.replace(tzinfo=UTC)
+                if expires_at.tzinfo is None
+                else expires_at.astimezone(UTC)
+            )
+            if comparable_expiry <= now:
+                raise ValueError("preference expiration must be in the future")
+
+        allowed_from = {
+            "confirm": {"candidate", "rejected", "revoked"},
+            "reject": {"candidate"},
+            "revoke": {"confirmed"},
+        }
+        target = targets[action]
+        with self.database.session() as session:
+            preference = self._required(
+                session, PreferenceRecord, preference_id
+            )
+            if preference.user_id != user_id:
+                raise KeyError(
+                    f"PreferenceRecord not found: {preference_id}"
+                )
+            if preference.status == target:
+                return self._preference_bundle(session, preference)
+            if preference.status not in allowed_from[action]:
+                raise ValueError(
+                    f"Preference {preference_id} cannot {action} "
+                    f"from status {preference.status}"
+                )
+
+            previous_status = preference.status
+            preference.status = target
+            preference.expires_at = expires_at if action == "confirm" else None
+            preference.updated_at = now
+            session.add(
+                PreferenceReviewRecord(
+                    id=_new_id(),
+                    preference_id=preference.id,
+                    user_id=user_id,
+                    action=action,
+                    previous_status=previous_status,
+                    new_status=target,
+                    reason=reason,
+                )
+            )
+            session.flush()
+            return self._preference_bundle(session, preference)
+
     def get_task_bundle(self, task_id: str) -> dict[str, Any]:
         with self.database.session() as session:
             task = self._required(session, TaskRecord, task_id)
@@ -1560,6 +1869,43 @@ class ExecutionStore:
                     .order_by(TaskEventRecord.created_at, TaskEventRecord.id)
                 )
             )
+            memory_sources = list(
+                session.scalars(
+                    select(MemorySourceRecord)
+                    .where(MemorySourceRecord.task_id == task_id)
+                    .order_by(
+                        MemorySourceRecord.captured_at,
+                        MemorySourceRecord.id,
+                    )
+                )
+            )
+            memory_source_ids = [item.id for item in memory_sources]
+            preference_ids = (
+                list(
+                    session.scalars(
+                        select(PreferenceEvidenceRecord.preference_id)
+                        .where(
+                            PreferenceEvidenceRecord.memory_source_id.in_(
+                                memory_source_ids
+                            )
+                        )
+                        .distinct()
+                    )
+                )
+                if memory_source_ids
+                else []
+            )
+            preference_candidates = (
+                list(
+                    session.scalars(
+                        select(PreferenceRecord)
+                        .where(PreferenceRecord.id.in_(preference_ids))
+                        .order_by(PreferenceRecord.created_at)
+                    )
+                )
+                if preference_ids
+                else []
+            )
             return {
                 "task": _record_dict(task),
                 "runs": [_record_dict(item) for item in runs],
@@ -1571,6 +1917,13 @@ class ExecutionStore:
                 "decision_records": [_record_dict(item) for item in decisions],
                 "queue_jobs": [_record_dict(item) for item in queue_jobs],
                 "task_events": [_record_dict(item) for item in task_events],
+                "memory_sources": [
+                    _record_dict(item) for item in memory_sources
+                ],
+                "preference_candidates": [
+                    self._preference_dict(item)
+                    for item in preference_candidates
+                ],
             }
 
     def list_tasks(self, *, limit: int = 50) -> list[dict[str, Any]]:
@@ -1593,6 +1946,69 @@ class ExecutionStore:
         with self.database.session() as session:
             records = session.scalars(select(SkillRecord).order_by(SkillRecord.id))
             return [_record_dict(item) for item in records]
+
+    @staticmethod
+    def _preference_dict(preference: PreferenceRecord) -> dict[str, Any]:
+        result = _record_dict(preference)
+        result["effective_status"] = preference.status
+        expires_at = preference.expires_at
+        if expires_at is not None and preference.status == "confirmed":
+            comparable_expiry = (
+                expires_at.replace(tzinfo=UTC)
+                if expires_at.tzinfo is None
+                else expires_at.astimezone(UTC)
+            )
+            if comparable_expiry <= utc_now():
+                result["effective_status"] = "expired"
+        return result
+
+    def _preference_bundle(
+        self,
+        session: Session,
+        preference: PreferenceRecord,
+    ) -> dict[str, Any]:
+        evidence_links = list(
+            session.scalars(
+                select(PreferenceEvidenceRecord)
+                .where(
+                    PreferenceEvidenceRecord.preference_id == preference.id
+                )
+                .order_by(PreferenceEvidenceRecord.created_at)
+            )
+        )
+        source_ids = [item.memory_source_id for item in evidence_links]
+        sources = {
+            item.id: item
+            for item in (
+                session.scalars(
+                    select(MemorySourceRecord).where(
+                        MemorySourceRecord.id.in_(source_ids)
+                    )
+                )
+                if source_ids
+                else []
+            )
+        }
+        reviews = list(
+            session.scalars(
+                select(PreferenceReviewRecord)
+                .where(
+                    PreferenceReviewRecord.preference_id == preference.id
+                )
+                .order_by(PreferenceReviewRecord.created_at)
+            )
+        )
+        return {
+            "preference": self._preference_dict(preference),
+            "evidence": [
+                {
+                    "link": _record_dict(item),
+                    "source": _record_dict(sources[item.memory_source_id]),
+                }
+                for item in evidence_links
+            ],
+            "reviews": [_record_dict(item) for item in reviews],
+        }
 
     @staticmethod
     def _required(session: Session, model: Any, record_id: str) -> Any:
