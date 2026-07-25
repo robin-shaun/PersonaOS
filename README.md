@@ -306,7 +306,9 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
       workflows/           Workflow 定义与版本
     tests/                 核心闭环和 API 测试
 
-详细设计与安全边界见 docs/architecture.md。
+当前数字员工设计与安全边界见 [docs/architecture.md](docs/architecture.md)。
+向证据驱动数字分身演进的仓库审计、架构取舍和分阶段验收标准见
+[docs/persona-mvp-plan.md](docs/persona-mvp-plan.md)。
 
 ## 测试
 
@@ -328,7 +330,8 @@ GitHub 或模型 API 配额。
   通过结构校验、证据质量门禁和人工审批，两者都不替代维护者判断。
 - Hermes profile 必须专用于本系统且不启用任何工具或 MCP；普通 Hermes API
   Server 默认包含终端、文件和网络工具，不能直接用于当前只读岗位。
-- 尚未抽取个人偏好；当前只保存生成偏好所需的修改和决策证据。
+- 当前偏好抽取只支持用户修改、拒绝和显式反馈的确定性规则；尚无语义合并、
+  冲突检测、身份档案或通用人物记忆。
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
