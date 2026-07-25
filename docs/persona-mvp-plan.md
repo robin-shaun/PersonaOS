@@ -682,6 +682,20 @@ TypeScript 检查与 Vite 生产构建通过；Python `59 passed`，Ruff 全量�
 Nginx 容器和 `docker compose config` 未执行；Compose 只通过 YAML、安全约束与
 交付资产自动化测试，不能把这些结果当作真实容器验收。
 
+M5 在锁定依赖上完成本地验收：Python `62 passed`，Ruff、7 项 release gate、
+OpenAPI drift、pip audit、SQLite upgrade/check/downgrade 和 PostgreSQL offline
+SQL 均通过；Vitest `3 passed`，严格 TypeScript/Vite build 与 npm audit 通过。
+全新 production venv 能以 `--require-hashes` 安装并返回 0.11.0 健康状态，wheel
+包含 LICENSE 与 NOTICE。真实 SQLite API、Worker、Vite Web-origin smoke 返回
+`answered` 和 `C1`，来源定位为演示文件第 1–6 行。
+
+实现 commit `4c0824d3bdef0433b002f245bab9e7328995a01d` 的
+[GitHub CI 首次运行](https://github.com/robin-shaun/PersonaOS/actions/runs/30144791119)
+全部成功。托管 runner 真实构建固定 digest 镜像，从空 volume 启动
+PostgreSQL/pgvector、API、Worker 和非 root Nginx，完成健康检查与 Web-origin
+证据 smoke，并在结束时成功删除专用 CI volume。因此 M4 记录的“未执行真实
+Compose”限制已由 M5 发布门禁关闭；它仍不等于生产高可用或独立安全审计。
+
 唯一下一里程碑是 **M6：可信本地账户与人物空间隔离**。把服务端固定
 `local-user` 升级为可信会话，让两个账户的人物、资料、记忆、检索、导出、任务
 和审计具备可自动证明的零越权边界，并提供 0.11 单所有者数据的显式迁移。
