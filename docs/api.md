@@ -1,6 +1,6 @@
 # PersonaOS HTTP API
 
-PersonaOS 0.11.0 提供 FastAPI HTTP API。完整 Compose 中 API 直接地址是
+PersonaOS 0.12.0 提供 FastAPI HTTP API。完整 Compose 中 API 直接地址是
 `http://127.0.0.1:18110`，Web 同源入口是 `http://127.0.0.1:18111/api`。交互式
 Swagger UI 位于 `/docs`，运行时 schema 位于 `/openapi.json`；仓库同时提交
 [固定版本 OpenAPI 快照](openapi.json)，CI 会阻止实现与快照漂移。
@@ -11,17 +11,74 @@ Swagger UI 位于 `/docs`，运行时 schema 位于 `/openapi.json`；仓库同�
 
 ## 访问与信任模型
 
-人物端点不接受请求方提供的 owner。owner 和 actor 都来自服务端
-`PERSONA_LOCAL_OWNER_ID`，因此 0.11.0 是本机单所有者 API，不是认证或多租户
-API。`user_id` 参数只存在于旧的数字员工/偏好接口，是本地关联标识，不能被当作
-可信身份。
+除 `/health`、`/api/v1/auth/status` 和 `/api/v1/auth/login` 外，所有
+`/api/v1/*` 都需要有效的 `personaos_session` Cookie。服务端只保存 256-bit
+随机 Cookie 值的 SHA-256 摘要，并从会话账户派生 owner 和 actor；业务 payload
+不再接受可信 `user_id` 或 `requested_by`。跨账户资源统一表现为 `404`。
 
-所有示例均假设只监听 `127.0.0.1`。在加入登录、会话、CSRF/速率限制和可信
-租户隔离前，不要把它暴露到公网或不可信局域网。
+所有已认证的 `POST`、`PUT`、`PATCH` 和 `DELETE` 还必须发送当前会话返回的
+`X-CSRF-Token`；浏览器请求存在 `Origin` 时必须与实际 Host 完全同源。Cookie
+使用 `HttpOnly` 和 `SameSite=Strict`，HTTPS 部署还必须配置
+`PERSONA_COOKIE_SECURE=true`。
+
+PostgreSQL 在应用层过滤之外强制 owner RLS；SQLite 不支持 RLS，只用于本机开发
+和相同的应用隔离测试。0.12 仍是回环地址上的本地账户系统，没有 MFA、自助恢复、
+集中限流、独立数据库角色或公网生产部署基线，不要把它直接暴露到公网或不可信
+局域网。
 
 调用人物端点时可以发送最多 100 个字符的 `X-Request-ID`。服务会把它写入相关
 审计事件，便于把用户操作和证据链关联起来；包含换行、制表符或过长的值会返回
 `400`。
+
+## 登录、会话与 CSRF
+
+首个管理员不能通过匿名 HTTP 注册，只能在可信主机创建：
+
+~~~bash
+.venv/bin/python -m apps.admin create-account \
+  --username admin --display-name Administrator --role admin
+~~~
+
+命令默认无回显提示密码，不接受密码命令行参数或环境变量；自动化场景可使用
+`--password-stdin`。浏览器工作台会自动完成下面的 Cookie/CSRF 协议。命令行
+客户端应把 cookie jar 放在权限受限的临时位置，且不要把真实密码、Cookie 或
+CSRF 写入日志。以下只展示协议，`PASSWORD` 代表安全输入而不是建议写入脚本：
+
+~~~bash
+COOKIE_JAR=./var/personaos-api.cookies
+LOGIN_RESPONSE="$(
+  curl -sS -c "$COOKIE_JAR" \
+    -H 'Content-Type: application/json' \
+    --data-binary '{"username":"admin","password":"PASSWORD"}' \
+    http://127.0.0.1:18110/api/v1/auth/login
+)"
+CSRF_TOKEN="$(
+  printf '%s' "$LOGIN_RESPONSE" |
+    .venv/bin/python -c 'import json,sys; print(json.load(sys.stdin)["csrf_token"])'
+)"
+~~~
+
+之后所有读取发送 `-b "$COOKIE_JAR"`；所有写入还发送
+`-H "X-CSRF-Token: $CSRF_TOKEN"`。`GET /api/v1/auth/session` 可以在页面刷新后
+恢复 CSRF，不需要读取 HttpOnly Cookie。`POST /api/v1/auth/logout` 会立即撤销
+服务端会话。
+
+登录和成功再认证都会轮换 Cookie。删除资料/记忆、包含解密原文的导出、允许
+`external` 数据边界、断开 GitHub 连接和创建账户需要默认五分钟内的密码验证；
+窗口过期返回 `428`：
+
+~~~bash
+curl -sS -X POST \
+  -b "$COOKIE_JAR" \
+  -c "$COOKIE_JAR" \
+  -H "X-CSRF-Token: $CSRF_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"password":"PASSWORD"}' \
+  http://127.0.0.1:18110/api/v1/auth/reauthenticate
+~~~
+
+再认证响应包含新的 `csrf_token`，调用方必须替换旧值，再由用户明确重试原高风险
+请求；服务不会自动执行它。
 
 ## 错误与并发语义
 
@@ -34,10 +91,13 @@ FastAPI 参数校验错误使用标准 `{"detail": [...]}` 响应。领域错误
 | `201` | 人物、关系、会话、消息、连接或反馈已创建 |
 | `202` | 资料导入、重建索引、项目任务、重试或取消请求已入队 |
 | `400` | 缺少高风险删除确认，或请求 ID 无效 |
-| `404` | 资源不存在，或不属于当前服务端 owner |
+| `401` | Cookie 缺失、无效、已撤销或过期，或登录凭据无效 |
+| `403` | CSRF/Origin 失败、角色不足或模型数据边界拒绝 |
+| `404` | 资源不存在，或不属于当前账户 |
 | `409` | 版本冲突、重复决策或任务状态不允许该操作 |
 | `413` | 人物导出超过配置的内存缓冲上限 |
 | `422` | schema 或领域约束不满足 |
+| `428` | 高风险动作要求近期再认证；不会自动重试原请求 |
 | `502` | 上游 GitHub/Hermes 失败，或回答 citation 未通过校验 |
 | `503` | 所需 GitHub App/Hermes 尚未配置或不可用 |
 
@@ -55,6 +115,8 @@ FastAPI 参数校验错误使用标准 `{"detail": [...]}` 响应。领域错误
 
 ~~~bash
 curl -sS -X POST http://127.0.0.1:18110/api/v1/personas \
+  -b "$COOKIE_JAR" \
+  -H "X-CSRF-Token: $CSRF_TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'X-Request-ID: demo-create-persona' \
   -d '{
@@ -71,10 +133,13 @@ curl -sS -X POST http://127.0.0.1:18110/api/v1/personas \
 ~~~bash
 curl -sS -X POST \
   'http://127.0.0.1:18110/api/v1/personas/PERSONA_ID/documents?language=zh-CN' \
+  -b "$COOKIE_JAR" \
+  -H "X-CSRF-Token: $CSRF_TOKEN" \
   -H 'X-Request-ID: demo-upload' \
   -F 'file=@examples/data/demo-journal.md;type=text/markdown'
 
-curl -sS http://127.0.0.1:18110/api/v1/tasks/TASK_ID
+curl -sS -b "$COOKIE_JAR" \
+  http://127.0.0.1:18110/api/v1/tasks/TASK_ID
 ~~~
 
 只接受配置大小内的 UTF-8 `.txt` 或 `.md`。`202` 响应包含 `document` 和
@@ -85,10 +150,13 @@ curl -sS http://127.0.0.1:18110/api/v1/tasks/TASK_ID
 
 ~~~bash
 curl -sS \
+  -b "$COOKIE_JAR" \
   http://127.0.0.1:18110/api/v1/personas/PERSONA_ID/memory-candidates
 
 curl -sS -X POST \
   http://127.0.0.1:18110/api/v1/memory-candidates/MEMORY_ID/review \
+  -b "$COOKIE_JAR" \
+  -H "X-CSRF-Token: $CSRF_TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'X-Request-ID: demo-review' \
   -d '{
@@ -106,11 +174,15 @@ curl -sS -X POST \
 ~~~bash
 curl -sS -X POST \
   http://127.0.0.1:18110/api/v1/personas/PERSONA_ID/conversations \
+  -b "$COOKIE_JAR" \
+  -H "X-CSRF-Token: $CSRF_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"title":"证据问答"}'
 
 curl -sS -X POST \
   http://127.0.0.1:18110/api/v1/conversations/CONVERSATION_ID/messages \
+  -b "$COOKIE_JAR" \
+  -H "X-CSRF-Token: $CSRF_TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'X-Request-ID: demo-question' \
   -d '{"content":"我什么时候加入 PersonaOS 项目？","top_k":5}'
@@ -131,7 +203,7 @@ curl -sS -X POST \
 
 | 方法与路径 | 行为 |
 | --- | --- |
-| `POST /api/v1/personas` | 创建本地 owner 下的人物档案 |
+| `POST /api/v1/personas` | 在当前可信账户下创建人物档案 |
 | `GET /api/v1/personas` | 列出人物；`include_inactive=true` 包含停用人物 |
 | `GET /api/v1/personas/{id}` | 读取人物、模拟声明与模型策略 |
 | `PATCH /api/v1/personas/{id}/model-policy` | 修改允许的模型数据边界 |
@@ -168,8 +240,8 @@ Blob object key。
 | `GET /api/v1/skills` | 列出已注册 Skill 版本与契约 |
 | `GET /api/v1/runtime/status` | 检查规则或 Hermes runtime |
 | `POST /api/v1/github/connections` | 验证 GitHub App installation 并连接单仓库 |
-| `GET /api/v1/github/connections?user_id=...` | 列出本地用户标识的连接 |
-| `DELETE /api/v1/github/connections/{id}?user_id=...` | 断开连接并阻止新读取 |
+| `GET /api/v1/github/connections` | 列出当前账户的连接 |
+| `DELETE /api/v1/github/connections/{id}` | 近期再认证后断开当前账户连接 |
 | `POST /api/v1/tasks/project-maintenance` | 排队生成只读项目简报和 Issue 建议 |
 | `GET /api/v1/tasks` | 列出最近任务 |
 | `GET /api/v1/tasks/{id}` | 读取队列、运行、步骤、审批与产物轨迹 |
@@ -180,7 +252,24 @@ Blob object key。
 
 偏好接口位于 `/api/v1/users/{user_id}/preferences` 和
 `/api/v1/preferences/{id}`。候选必须确认且未过期才会进入 Personal Context。
-这些 `user_id` 仍是调用方提供的本地标识；可信账户体系属于后续里程碑。
+路径中的 `user_id` 必须与当前会话账户 ID 完全一致，否则返回 `404`；详情与审核
+接口也会在仓储层重复匹配当前账户。
+
+## 账户管理
+
+| 方法与路径 | 行为 |
+| --- | --- |
+| `GET /api/v1/auth/status` | 公开返回本地认证模式和是否需要首个管理员 |
+| `POST /api/v1/auth/login` | 验证 Argon2id 密码并轮换已有 Cookie |
+| `GET /api/v1/auth/session` | 返回可信账户、会话期限和 CSRF |
+| `POST /api/v1/auth/reauthenticate` | 验证当前密码并轮换 Cookie/CSRF |
+| `POST /api/v1/auth/logout` | 撤销当前会话 |
+| `GET /api/v1/accounts` | 管理员列出账户，不返回凭据材料 |
+| `POST /api/v1/accounts` | 近期再认证的管理员创建隔离账户 |
+
+0.12 尚不提供账户停用、密码修改、自助恢复或 MFA endpoint。主机管理员可以使用
+受信 CLI 创建账户和执行 legacy owner 迁移，但 CLI 权限等同于主机/数据库控制权，
+不构成对恶意主机管理员的隔离。
 
 ## OpenAPI 维护
 

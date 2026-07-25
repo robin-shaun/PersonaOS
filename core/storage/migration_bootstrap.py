@@ -29,6 +29,22 @@ _M2_PERSONA_TABLES = _M1_PERSONA_TABLES | {
     "persona_model_calls",
     "persona_retrieval_runs",
 }
+_M4_AUTH_TABLES = {
+    "auth_events",
+    "auth_sessions",
+    "legacy_owner_migrations",
+}
+_M4_USER_COLUMNS = {
+    "failed_login_count",
+    "last_login_at",
+    "locked_until",
+    "password_changed_at",
+    "password_hash",
+    "role",
+    "status",
+    "updated_at",
+    "username",
+}
 
 
 def prepare_startup_database(
@@ -92,7 +108,22 @@ def _recognized_persona_revision(inspector, tables: set[str]) -> str:
     has_policy = "allowed_model_boundaries" in persona_columns
     has_relations = "persona_memory_relations" in tables
     if has_policy and has_relations:
-        return "0003"
+        present_auth_tables = tables & _M4_AUTH_TABLES
+        user_columns = {
+            item["name"] for item in inspector.get_columns("users")
+        }
+        present_auth_columns = user_columns & _M4_USER_COLUMNS
+        if (
+            present_auth_tables == _M4_AUTH_TABLES
+            and present_auth_columns == _M4_USER_COLUMNS
+        ):
+            return "0004"
+        if not present_auth_tables and not present_auth_columns:
+            return "0003"
+        raise RuntimeError(
+            "Unversioned persona database contains a partial M4 schema; "
+            "refusing to guess a migration revision."
+        )
     if not has_policy and not has_relations:
         return "0002"
     raise RuntimeError(

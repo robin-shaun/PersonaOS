@@ -1,21 +1,24 @@
-"""Run the free PersonaOS release smoke test through the Web origin.
+"""Run the free two-account PersonaOS smoke test through the Web origin.
 
-The test intentionally creates one fictional persona and keeps it available so
-the result can be inspected in the UI. It never calls a paid model.
+The test creates fictional data in two independently authenticated workspaces,
+proves the complete evidence loop in both, and probes cross-account resources.
+It never calls a paid model.
 """
 
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import mimetypes
+import os
 import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEMO_SOURCE = PROJECT_ROOT / "examples" / "data" / "demo-journal.md"
@@ -28,6 +31,19 @@ class SmokeError(RuntimeError):
 class Client:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
+        self.csrf_token = ""
+        self._opener = build_opener(
+            HTTPCookieProcessor(http.cookiejar.CookieJar())
+        )
+
+    def login(self, username: str, password: str) -> dict[str, Any]:
+        result = self.json(
+            "POST",
+            "/api/v1/auth/login",
+            {"username": username, "password": password},
+        )
+        self.csrf_token = str(result["csrf_token"])
+        return result
 
     def json(
         self,
@@ -42,6 +58,10 @@ class Client:
             "Accept": "application/json",
             "X-Request-ID": f"compose-smoke-{uuid.uuid4()}",
         }
+        if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+            headers["Origin"] = self.base_url
+            if self.csrf_token:
+                headers["X-CSRF-Token"] = self.csrf_token
         if payload is not None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -65,6 +85,8 @@ class Client:
             {
                 "Accept": "application/json",
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": self.base_url,
+                "X-CSRF-Token": self.csrf_token,
                 "X-Request-ID": f"compose-smoke-{uuid.uuid4()}",
             },
             timeout=20,
@@ -75,8 +97,27 @@ class Client:
             f"{self.base_url}{path}",
             headers={"Accept": "text/html"},
         )
-        with urlopen(request, timeout=timeout) as response:
+        with self._opener.open(request, timeout=timeout) as response:
             return response.read().decode("utf-8")
+
+    def require_http_error(
+        self,
+        method: str,
+        path: str,
+        expected_status: int,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            self.json(method, path, payload)
+        except SmokeError as exc:
+            require(
+                f"HTTP {expected_status}:" in str(exc),
+                f"{method} {path} did not return HTTP {expected_status}: {exc}",
+            )
+            return
+        raise SmokeError(
+            f"{method} {path} unexpectedly crossed the account boundary"
+        )
 
     def _send(
         self,
@@ -94,8 +135,9 @@ class Client:
             method=method,
         )
         try:
-            with urlopen(request, timeout=timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+            with self._opener.open(request, timeout=timeout) as response:
+                content = response.read().decode("utf-8")
+                return json.loads(content) if content else None
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise SmokeError(
@@ -143,15 +185,18 @@ def wait_for_task(
     raise SmokeError(f"ingestion task remained {last_status}")
 
 
-def run(base_url: str, timeout: float) -> dict[str, Any]:
-    client = Client(base_url)
-    health = wait_until_ready(client, timeout)
+def exercise_evidence_loop(
+    client: Client,
+    *,
+    label: str,
+    timeout: float,
+) -> dict[str, Any]:
     suffix = uuid.uuid4().hex[:8]
     persona = client.json(
         "POST",
         "/api/v1/personas",
         {
-            "display_name": f"Compose Smoke {suffix}",
+            "display_name": f"Compose Smoke {label} {suffix}",
             "description": "PersonaOS 空环境纵向验收使用的虚构人物。",
         },
     )
@@ -209,6 +254,16 @@ def run(base_url: str, timeout: float) -> dict[str, Any]:
         citation["source"]["filename"] == DEMO_SOURCE.name,
         "citation does not resolve to the uploaded source",
     )
+    exported = client.json(
+        "POST",
+        f"/api/v1/personas/{persona['id']}/export",
+        {"include_raw_sources": True},
+        timeout=30,
+    )
+    require(
+        exported["manifest"]["included_raw_sources"] is True,
+        "recent login did not authorize raw-source export",
+    )
 
     audits = client.json(
         "GET",
@@ -226,15 +281,129 @@ def run(base_url: str, timeout: float) -> dict[str, Any]:
         "audit trail is incomplete",
     )
     return {
-        "web_origin": base_url.rstrip("/"),
-        "runtime": health["runtime"],
         "persona_id": persona["id"],
         "document_id": document["document"]["id"],
+        "task_id": upload["queue_submission"]["task_id"],
         "confirmed_memory_id": confirmed["memory"]["id"],
+        "conversation_id": conversation["id"],
+        "assistant_message_id": answer["assistant_message"]["id"],
         "answer_status": answer["assistant_message"]["answer_status"],
         "citation_id": citation["citation"]["citation_id"],
         "source_locator": citation["source"]["locator"],
         "audit_actions": sorted(actions),
+    }
+
+
+def assert_cross_account_denied(
+    client: Client,
+    other: dict[str, Any],
+) -> None:
+    probes: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
+        ("GET", f"/api/v1/personas/{other['persona_id']}", None),
+        ("GET", f"/api/v1/documents/{other['document_id']}", None),
+        ("GET", f"/api/v1/memories/{other['confirmed_memory_id']}", None),
+        ("GET", f"/api/v1/tasks/{other['task_id']}", None),
+        (
+            "GET",
+            f"/api/v1/conversations/{other['conversation_id']}/messages",
+            None,
+        ),
+        (
+            "GET",
+            f"/api/v1/messages/{other['assistant_message_id']}/citations",
+            None,
+        ),
+        (
+            "GET",
+            f"/api/v1/personas/{other['persona_id']}/audit-events",
+            None,
+        ),
+        (
+            "POST",
+            f"/api/v1/personas/{other['persona_id']}/export",
+            {"include_raw_sources": True},
+        ),
+        (
+            "DELETE",
+            f"/api/v1/documents/{other['document_id']}?confirm=true",
+            None,
+        ),
+        (
+            "DELETE",
+            (
+                f"/api/v1/memories/"
+                f"{other['confirmed_memory_id']}?confirm=true"
+            ),
+            None,
+        ),
+        (
+            "POST",
+            f"/api/v1/tasks/{other['task_id']}/cancel",
+            {"reason": "cross-account smoke probe"},
+        ),
+    )
+    for method, path, payload in probes:
+        client.require_http_error(method, path, 404, payload)
+
+
+def run(
+    base_url: str,
+    timeout: float,
+    *,
+    admin_username: str,
+    admin_password: str,
+    member_username: str,
+    member_password: str,
+) -> dict[str, Any]:
+    readiness_client = Client(base_url)
+    health = wait_until_ready(readiness_client, timeout)
+    admin_client = Client(base_url)
+    member_client = Client(base_url)
+    admin_session = admin_client.login(admin_username, admin_password)
+    member_session = member_client.login(member_username, member_password)
+    require(
+        admin_session["account"]["username"] == admin_username,
+        "admin login resolved the wrong account",
+    )
+    require(
+        member_session["account"]["username"] == member_username,
+        "member login resolved the wrong account",
+    )
+
+    admin_loop = exercise_evidence_loop(
+        admin_client,
+        label="admin",
+        timeout=timeout,
+    )
+    member_loop = exercise_evidence_loop(
+        member_client,
+        label="member",
+        timeout=timeout,
+    )
+    require(
+        admin_loop["task_id"] != member_loop["task_id"],
+        "content-identical ingestion replayed across accounts",
+    )
+    assert_cross_account_denied(admin_client, member_loop)
+    assert_cross_account_denied(member_client, admin_loop)
+    require(
+        {item["id"] for item in admin_client.json("GET", "/api/v1/personas")}
+        == {admin_loop["persona_id"]},
+        "admin persona listing crossed account boundaries",
+    )
+    require(
+        {item["id"] for item in member_client.json("GET", "/api/v1/personas")}
+        == {member_loop["persona_id"]},
+        "member persona listing crossed account boundaries",
+    )
+    return {
+        "web_origin": base_url.rstrip("/"),
+        "runtime": health["runtime"],
+        "accounts": {
+            admin_username: admin_loop,
+            member_username: member_loop,
+        },
+        "cross_account_probes": 22,
     }
 
 
@@ -253,9 +422,30 @@ def main() -> int:
         type=float,
         help="Maximum seconds to wait for services and ingestion.",
     )
+    parser.add_argument(
+        "--admin-username",
+        default=os.getenv("PERSONAOS_SMOKE_ADMIN_USERNAME", "smoke-admin"),
+    )
+    parser.add_argument(
+        "--member-username",
+        default=os.getenv("PERSONAOS_SMOKE_MEMBER_USERNAME", "smoke-member"),
+    )
     args = parser.parse_args()
     try:
-        result = run(args.base_url, args.timeout)
+        admin_password = os.getenv("PERSONAOS_SMOKE_ADMIN_PASSWORD", "")
+        member_password = os.getenv("PERSONAOS_SMOKE_MEMBER_PASSWORD", "")
+        require(
+            bool(admin_password and member_password),
+            "smoke passwords must be supplied through environment variables",
+        )
+        result = run(
+            args.base_url,
+            args.timeout,
+            admin_username=args.admin_username,
+            admin_password=admin_password,
+            member_username=args.member_username,
+            member_password=member_password,
+        )
     except (OSError, SmokeError, URLError) as exc:
         print(f"PersonaOS smoke failed: {exc}", file=sys.stderr)
         return 1

@@ -2,7 +2,7 @@
 
 ## 产品边界
 
-PersonaOS `0.11.0` 有两个相互隔离但复用同一运行底座的产品闭环：
+PersonaOS `0.12.0` 有两个相互隔离但复用同一运行底座的产品闭环：
 
 1. 人物资料闭环：创建 Persona，导入授权文本，生成有来源候选，由用户确认或
    拒绝，并仅用确认的当前版本完成混合检索与带引用问答；
@@ -10,13 +10,50 @@ PersonaOS `0.11.0` 有两个相互隔离但复用同一运行底座的产品闭�
    用户审批形成的行为证据。
 
 人物闭环不声称系统是现实中的本人；项目维护员工不自动修改 GitHub。React Web
-工作台覆盖人物闭环与任务/审计查看，但登录、多租户和模型驱动总结不属于本版本。
+工作台覆盖登录、人物闭环、账户、任务与审计查看；模型驱动总结、MFA 和公网
+身份平台不属于本版本。
 
 ![PersonaOS 本地优先证据架构](architecture.svg)
 
+## 可信本地账户与数据隔离
+
+    Browser
+      │  HttpOnly / SameSite=Strict opaque Cookie
+      │  unsafe request + session-bound X-CSRF-Token
+      ▼
+    Authentication middleware
+      ├── Argon2id credential verification + temporary lockout
+      ├── token digest / idle + absolute expiry / revocation
+      ├── Origin + CSRF validation
+      └── AccessContext(account.id)
+                    │
+            application owner filters
+                    │
+                    ▼
+    PostgreSQL transaction-local owner GUC
+      ├── direct owner USING + WITH CHECK policies
+      ├── child-row policies through owned parents
+      ├── FORCE ROW LEVEL SECURITY
+      └── explicit system scope for auth, Worker queue and migration only
+
+首个管理员只从受信主机 CLI 创建，不存在匿名 HTTP bootstrap。密码使用
+`argon2-cffi` RFC 9106 low-memory Argon2id profile，数据库不保存可用的会话
+bearer token。登录、再认证、失败、拒绝和注销写入独立 `auth_events`，detail
+不包含密码、Cookie、CSRF、User-Agent 原文或人物资料。
+
+登录和再认证都会轮换会话 token；高风险动作在近期验证窗口外返回机器可识别的
+`428`，且不会自动执行原动作。当前高风险集合包括删除资料/记忆、含解密原文的
+导出、允许 external 模型、断开 GitHub 连接和创建账户。
+
+RLS 的 system bypass 是应用在 transaction-local GUC 中显式设置的能力，所有
+使用点可以通过 `session(system=True)` 搜索。Compose 当前迁移与运行仍共用数据库
+角色，因此 RLS 用于捕获仓储漏过滤，而不是抵御数据库凭据失守或任意 SQL。
+SQLite 没有 RLS，只执行同一套应用层双账户测试。完整取舍见
+[ADR 0004](adr/0004-trusted-local-accounts.md)。
+
 ## 人物资料证据链
 
-    FastAPI（固定本地 owner）
+    FastAPI（已验证本地会话 → 可信 owner）
               │
               ├── PersonaService ── 文件白名单、大小和 UTF-8 校验
               │         │
@@ -40,9 +77,10 @@ checkpoint、task input、tool call 和错误记录只保存哈希、大小、ID
 保存原文。候选初始版本标记 `user_confirmed=false`；确认总是派生一个新版本，
 复制来源证据并标记人工确认，原版本不被覆盖。
 
-`AccessContext` 来自服务端配置而不是请求参数。MVP 只有一个本地 owner，这是一条
-明确的部署限制，不等价于认证系统。所有人物、资料和记忆查询仍在 repository
-边界重复执行 owner 过滤，为以后替换成登录会话保留接口。
+`AccessContext` 只能由 FastAPI 中间件验证服务端会话后构造，owner 与 actor 均为
+当前账户 ID。人物、资料、记忆、检索、任务、偏好和 GitHub 查询在 repository
+边界重复执行 owner 过滤；请求体中的额外 `user_id` / `requested_by` 被严格
+schema 拒绝，路径中的账户 ID 必须与会话一致。
 
 原始 Blob 已应用层加密，但 chunk、候选和证据摘录为后续检索保存在数据库可读
 字段，因此仍要求磁盘/volume 加密。`source_verified` 表示可定位回授权资料，
@@ -139,8 +177,8 @@ JSON 导出包含 Persona、资料/分块、记忆版本/证据/关系、会话�
 
 ## Web 管理端与同源交付
 
-M4 的 Web 是 React/TypeScript 单页工作台，不是新的业务真源。所有状态变化仍由
-FastAPI 的 owner、版本、权限、确认和审计边界执行：
+Web 是 React/TypeScript 单页工作台，不是新的业务真源。所有状态变化仍由
+FastAPI 的可信会话、owner、版本、权限、确认和审计边界执行：
 
     Browser :18111
          │
@@ -150,9 +188,10 @@ FastAPI 的 owner、版本、权限、确认和审计边界执行：
          └── /api/* ──────▶ FastAPI :18110
 
 生产构建由 Vite 生成静态资产，非 root Nginx 提供页面并做同源反向代理。浏览器
-不保存模型或数据库密钥，不直接连接 PostgreSQL/Worker，也不重新实现敏感等级、
-owner 或删除依赖图。API 继续单独映射 `127.0.0.1:18110` 以保持 CLI 和已有集成
-兼容；Web 映射 `127.0.0.1:18111`。未实现可信认证前，两者都不能代理到公网。
+只持有 HttpOnly Cookie 和内存态 CSRF，不把密码、Cookie、CSRF、模型或数据库
+密钥写入 localStorage；也不直接连接 PostgreSQL/Worker。API 继续单独映射
+`127.0.0.1:18110`，Web 映射 `127.0.0.1:18111`。本地认证不等于公网生产基线，
+两者仍不能直接代理到公网。
 
 同源方式避免为本地管理端打开宽泛 CORS。Nginx 设置 CSP、`frame-ancestors
 'none'`、`X-Frame-Options: DENY`、`nosniff`、`no-referrer`，并禁用浏览器摄像头、
@@ -160,9 +199,10 @@ owner 或删除依赖图。API 继续单独映射 `127.0.0.1:18110` 以保持 CL
 后端仍执行更严格的文件类型和实际字节上限校验。
 
 内置 Demo 只创建虚构人物并上传仓库内置文本，不调用付费模型，也不自动确认
-候选。`examples/compose_smoke.py` 从同一个 Web origin 验证静态页面、API 健康、
-人物创建、资料处理、显式测试确认、问答 citation 和审计链。会话 ID 和所选人物
-ID 只作为导航便利存入 localStorage；它们不是认证凭据。
+候选。`examples/compose_smoke.py` 从同一个 Web origin 让两个账户各自验证完整
+证据闭环并双向探测越权；`examples/postgres_rls_smoke.py` 再直接验证数据库默认
+拒绝和跨 owner 读写。只有所选人物 ID 作为导航便利进入 localStorage；认证材料
+不会进入。
 
 详细取舍见 [ADR 0002](adr/0002-local-web-workspace.md)。
 
@@ -203,7 +243,7 @@ Worker 原子领取作业后定期续租；进程在完成前退出时，租约�
 轻量主机开发使用 SQLite；Compose 使用 PostgreSQL，并在领取查询中使用
 `FOR UPDATE SKIP LOCKED`。两者都保留后续的条件更新作为租约所有权保护。
 Compose 启动 API 前执行 Alembic，应用进程关闭自动建表；`start.sh` 会升级
-新库、已版本化库和可明确识别的未版本化 M1/M2 人物库。人物功能前的旧 SQLite
+新库、已版本化库和可明确识别的未版本化 M1–M4 人物库。人物功能前的旧 SQLite
 仍保留自动建表兼容路径；部分迁移的未版本化人物库会拒绝自动 stamp。
 
 同一用户可以通过 `Idempotency-Key` 安全重试创建请求。相同键和相同输入返回
@@ -256,8 +296,8 @@ Workflow 每一步都会把当前 state 和 history 写入 workflow_runs。工�
 
 任务只保存 `github_connection_id`。API 入队和 Worker 执行时都会校验连接属于
 任务的 user_id 且状态为 active；Worker 每次开始执行时重新解析连接，因此连接
-在排队期间被断开后，任务不会继续读取仓库。当前 user_id 尚未由登录态签发，
-所以这只是数据层租户边界，不能替代生产身份认证。
+在排队期间被断开后，任务不会继续读取仓库。HTTP 入口的 user_id 由登录会话
+签发并在入队时固化；Worker 重新校验任务 owner 和连接 owner。
 
 ## 数据证据
 
@@ -316,8 +356,8 @@ AgentRuntime 或业务 Workflow 的调用边界。
 
 ## 安全约束
 
-- 人物 API 使用服务端固定 owner，Compose 只映射到 `127.0.0.1`；未实现认证前
-  不允许暴露到不可信网络。
+- API 使用可信本地会话、CSRF/Origin、应用 owner 过滤和 PostgreSQL FORCE RLS；
+  Compose 仍只映射到 `127.0.0.1`，本地单因素认证不允许直接暴露到不可信网络。
 - 原始资料只接受限定大小的 UTF-8 `.txt`/`.md`，按 SHA-256 寻址并用
   AES-256-GCM 加密；密钥来自环境、密钥文件或首次启动生成的 0600 文件。
 - Blob object key 有固定格式和根目录约束，读取时同时验证 AEAD tag 与内容哈希。
@@ -368,7 +408,8 @@ GitHub Actions 固定完整 commit SHA，workflow token 默认只有 `contents: 
 CI 的后端 job 验证 Ruff、Python 测试、SQLite migration、PostgreSQL offline
 SQL、OpenAPI、依赖审计和 release gate；Web job 验证 Vitest、TypeScript/Vite
 构建和 npm audit；Compose job 从空 volume 验证真实 PostgreSQL/pgvector、API、
-Worker 与 Nginx 同源证据闭环。
+Worker 与 Nginx 的双账户同源证据闭环，并直接验证 RLS 默认拒绝和跨 owner
+读写。
 
 这些措施降低构建漂移和常见供应链风险，但不构成上游代码证明、独立渗透测试或
 生产安全认证。完整取舍见
@@ -376,6 +417,7 @@ Worker 与 Nginx 同源证据闭环。
 
 ## 唯一下一里程碑
 
-M6 只交付可信本地账户与人物空间隔离：安全会话、服务端 actor、全领域账户
-归属、跨账户零召回/零读取/零修改、近期再认证和 0.11 单所有者迁移。它仍不会
-把本地认证伪装成互联网生产多租户能力。
+M7 只交付记忆真实性分类与人物时间线：统一“用户明确提供、资料可验证、系统
+总结、模型推断、用户设定”的可查询 schema，并让每个时间线事件展示来源、
+事件时间、版本、置信度和不确定性。它不会声称时间线等于现实本人或自动把推断
+写成历史。

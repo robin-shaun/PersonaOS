@@ -172,6 +172,7 @@ async def test_user_edit_becomes_reviewable_preference_and_confirmed_context(
 @pytest.mark.asyncio
 async def test_preference_api_enforces_owner_and_review_lifecycle(
     container: Container,
+    authenticate_client,
 ) -> None:
     bundle = await container.project_maintenance.create_and_run(
         ProjectMaintenanceCommand(
@@ -192,6 +193,7 @@ async def test_preference_api_enforces_owner_and_review_lifecycle(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, container, account_id="shaun")
         listed = await client.get("/api/v1/users/shaun/preferences")
         assert listed.status_code == 200
         assert listed.json()[0]["id"] == candidate["id"]
@@ -201,15 +203,13 @@ async def test_preference_api_enforces_owner_and_review_lifecycle(
         assert sources.json()[0]["source_type"] == "feedback"
 
         hidden = await client.get(
-            f"/api/v1/preferences/{candidate['id']}",
-            params={"user_id": "another-user"},
+            "/api/v1/users/another-user/preferences",
         )
         assert hidden.status_code == 404
 
         confirmed = await client.post(
             f"/api/v1/preferences/{candidate['id']}/review",
             json={
-                "user_id": "shaun",
                 "action": "confirm",
                 "reason": "确认使用",
             },
@@ -220,7 +220,6 @@ async def test_preference_api_enforces_owner_and_review_lifecycle(
         cannot_reject = await client.post(
             f"/api/v1/preferences/{candidate['id']}/review",
             json={
-                "user_id": "shaun",
                 "action": "reject",
             },
         )
@@ -232,7 +231,6 @@ async def test_preference_api_enforces_owner_and_review_lifecycle(
             stored.expires_at = datetime.now(UTC) - timedelta(seconds=1)
         expired = await client.get(
             f"/api/v1/preferences/{candidate['id']}",
-            params={"user_id": "shaun"},
         )
         assert expired.json()["preference"]["effective_status"] == "expired"
         assert container.personalization.for_task(
@@ -243,7 +241,6 @@ async def test_preference_api_enforces_owner_and_review_lifecycle(
         revoked = await client.post(
             f"/api/v1/preferences/{candidate['id']}/review",
             json={
-                "user_id": "shaun",
                 "action": "revoke",
                 "reason": "暂时不再应用",
             },

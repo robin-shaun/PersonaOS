@@ -176,7 +176,10 @@ class PersonaService:
                 "created": submission["created"],
                 "idempotency_replayed": not submission["created"],
             },
-            "task": self._execution_store.get_task_bundle(submission["task_id"]),
+            "task": self._execution_store.get_task_bundle(
+                submission["task_id"],
+                expected_user_id=access.owner_id,
+            ),
         }
 
     def list_documents(
@@ -498,13 +501,17 @@ class PersonaService:
         task_id = document.get("task_id")
         if not task_id:
             return None
-        task = self._execution_store.get_task_bundle(str(task_id))["task"]
+        task = self._execution_store.get_task_bundle(
+            str(task_id),
+            expected_user_id=access.owner_id,
+        )["task"]
         if task["status"] not in {"pending", "running", "cancelling"}:
             return None
         cancellation = self._execution_store.request_task_cancellation(
             str(task_id),
             requested_by=access.actor_id,
             reason="source document deletion requested",
+            expected_user_id=access.owner_id,
         )
         if cancellation["status"] == "cancelling":
             raise ValueError(

@@ -85,6 +85,7 @@ raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
 
 if ! "${VENV_PYTHON}" -c '
 import alembic
+import argon2
 import cryptography
 import fastapi
 import httpx
@@ -378,10 +379,22 @@ if ! wait_for_http "${API_BASE_URL}/health" 20 >/dev/null; then
     die "API 未能在 20 秒内就绪"
 fi
 
-if ! RUNTIME_STATUS="$(get_required "${API_BASE_URL}/api/v1/runtime/status")"; then
-    die "Agent Runtime 检查失败"
+if ! RUNTIME_STATUS="$(get_required "${API_BASE_URL}/health")"; then
+    die "服务健康检查失败"
 fi
 log "Agent Runtime 已就绪：${RUNTIME_STATUS}"
+
+if ! AUTH_STATUS="$(get_required "${API_BASE_URL}/api/v1/auth/status")"; then
+    die "认证状态检查失败"
+fi
+if "${VENV_PYTHON}" -c '
+import json
+import sys
+raise SystemExit(0 if json.load(sys.stdin)["setup_required"] else 1)
+' <<<"${AUTH_STATUS}"; then
+    log "尚未创建登录账户。请在另一个终端运行："
+    log ".venv/bin/python -m apps.admin create-account --username admin --display-name Administrator --role admin"
+fi
 
 log "正在启动 Worker"
 "${VENV_PYTHON}" -m apps.worker.run &

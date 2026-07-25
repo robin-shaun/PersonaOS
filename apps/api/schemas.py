@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class ProjectMaintenanceTaskCreate(BaseModel):
+class StrictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProjectMaintenanceTaskCreate(StrictRequest):
     repository: str | None = Field(
         default=None,
         min_length=3,
@@ -23,7 +27,6 @@ class ProjectMaintenanceTaskCreate(BaseModel):
         min_length=1,
         max_length=100,
     )
-    user_id: str = Field(default="local-user", min_length=1, max_length=64)
     workflow_name: str = Field(
         default="daily-project-maintenance",
         min_length=1,
@@ -39,14 +42,6 @@ class ProjectMaintenanceTaskCreate(BaseModel):
         normalized = value.strip().strip("/")
         if len(normalized.split("/")) != 2:
             raise ValueError("repository must use the owner/name format")
-        return normalized
-
-    @field_validator("user_id")
-    @classmethod
-    def normalize_user_id(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("user_id must not be empty")
         return normalized
 
     @field_validator("github_connection_id")
@@ -68,8 +63,7 @@ class ProjectMaintenanceTaskCreate(BaseModel):
         return self
 
 
-class GitHubConnectionCreate(BaseModel):
-    user_id: str = Field(default="local-user", min_length=1, max_length=64)
+class GitHubConnectionCreate(StrictRequest):
     installation_id: int = Field(ge=1, le=9_223_372_036_854_775_807)
     repository: str = Field(
         min_length=3,
@@ -85,16 +79,8 @@ class GitHubConnectionCreate(BaseModel):
             raise ValueError("repository must use the owner/name format")
         return normalized
 
-    @field_validator("user_id")
-    @classmethod
-    def normalize_user_id(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("user_id must not be empty")
-        return normalized
 
-
-class ApprovalDecisionRequest(BaseModel):
+class ApprovalDecisionRequest(StrictRequest):
     decision: Literal["approved", "approved_with_edits", "rejected"]
     edited_output: dict[str, Any] | None = None
     reason: str | None = Field(default=None, max_length=4000)
@@ -106,33 +92,23 @@ class ApprovalDecisionRequest(BaseModel):
         return self
 
 
-class FeedbackCreate(BaseModel):
+class FeedbackCreate(StrictRequest):
     comment: str = Field(min_length=1, max_length=4000)
     rating: int | None = Field(default=None, ge=1, le=5)
 
 
-class TaskCancellationRequest(BaseModel):
+class TaskCancellationRequest(StrictRequest):
     reason: str = Field(
         default="cancelled by user",
         min_length=1,
         max_length=2000,
     )
-    requested_by: str = Field(default="api", min_length=1, max_length=200)
 
 
-class PreferenceReviewRequest(BaseModel):
-    user_id: str = Field(min_length=1, max_length=64)
+class PreferenceReviewRequest(StrictRequest):
     action: Literal["confirm", "reject", "revoke"]
     reason: str | None = Field(default=None, max_length=4000)
     expires_at: datetime | None = None
-
-    @field_validator("user_id")
-    @classmethod
-    def normalize_preference_user_id(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("user_id must not be empty")
-        return normalized
 
     @model_validator(mode="after")
     def validate_expiration(self) -> PreferenceReviewRequest:
@@ -141,7 +117,7 @@ class PreferenceReviewRequest(BaseModel):
         return self
 
 
-class PersonaCreate(BaseModel):
+class PersonaCreate(StrictRequest):
     display_name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=10_000)
 
@@ -154,14 +130,14 @@ class PersonaCreate(BaseModel):
         return normalized
 
 
-class PersonaModelPolicyUpdateRequest(BaseModel):
+class PersonaModelPolicyUpdateRequest(StrictRequest):
     allowed_model_boundaries: list[
         Literal["local", "private_network", "external"]
     ] = Field(min_length=1)
     external_data_acknowledged: bool = False
 
 
-class PersonaMemoryReviewRequest(BaseModel):
+class PersonaMemoryReviewRequest(StrictRequest):
     action: Literal["confirm", "reject"]
     edited_content: str | None = Field(default=None, max_length=20_000)
     reason: str | None = Field(default=None, max_length=4000)
@@ -178,7 +154,7 @@ class PersonaMemoryReviewRequest(BaseModel):
         return self
 
 
-class PersonaMemoryUpdateRequest(BaseModel):
+class PersonaMemoryUpdateRequest(StrictRequest):
     expected_version: int = Field(ge=1)
     content: str | None = Field(default=None, max_length=20_000)
     sensitivity: Literal["public", "private", "restricted"] | None = None
@@ -195,7 +171,7 @@ class PersonaMemoryUpdateRequest(BaseModel):
         return self
 
 
-class PersonaMemoryRelationCreate(BaseModel):
+class PersonaMemoryRelationCreate(StrictRequest):
     from_memory_id: str = Field(min_length=1, max_length=36)
     to_memory_id: str = Field(min_length=1, max_length=36)
     relation: Literal[
@@ -218,11 +194,11 @@ class PersonaMemoryRelationCreate(BaseModel):
         return value
 
 
-class PersonaExportRequest(BaseModel):
+class PersonaExportRequest(StrictRequest):
     include_raw_sources: bool = True
 
 
-class PersonaConversationCreate(BaseModel):
+class PersonaConversationCreate(StrictRequest):
     title: str | None = Field(default=None, max_length=300)
 
     @field_validator("title")
@@ -234,7 +210,7 @@ class PersonaConversationCreate(BaseModel):
         return normalized or None
 
 
-class PersonaQuestionCreate(BaseModel):
+class PersonaQuestionCreate(StrictRequest):
     content: str = Field(min_length=1, max_length=10_000)
     top_k: int = Field(default=5, ge=1, le=20)
 
@@ -245,3 +221,19 @@ class PersonaQuestionCreate(BaseModel):
         if not normalized:
             raise ValueError("content must not be empty")
         return normalized
+
+
+class LoginRequest(StrictRequest):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ReauthenticationRequest(StrictRequest):
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class AccountCreateRequest(StrictRequest):
+    username: str = Field(min_length=3, max_length=32)
+    display_name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=15, max_length=1024)
+    role: Literal["admin", "member"] = "member"

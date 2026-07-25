@@ -94,7 +94,10 @@ class ProjectMaintenanceService:
             if "Idempotency key" in str(exc):
                 raise TaskConflictError(str(exc)) from exc
             raise
-        bundle = self._store.get_task_bundle(submission["task_id"])
+        bundle = self._store.get_task_bundle(
+            submission["task_id"],
+            expected_user_id=command.user_id,
+        )
         bundle["queue_submission"] = {
             "created": submission["created"],
             "idempotency_replayed": not submission["created"],
@@ -512,19 +515,27 @@ class ApprovalService:
         decision: str,
         edited_output: dict[str, Any] | None = None,
         reason: str | None = None,
+        expected_user_id: str | None = None,
     ) -> dict[str, Any]:
         approval = self._store.resolve_approval(
             approval_id,
             decision=decision,
             edited_output=edited_output,
             reason=reason,
+            expected_user_id=expected_user_id,
         )
         learning = (
-            self._personalization.learn_from_task(approval["task_id"])
+            self._personalization.learn_from_task(
+                approval["task_id"],
+                expected_user_id=expected_user_id,
+            )
             if self._personalization is not None
             else None
         )
-        bundle = self._store.get_task_bundle(approval["task_id"])
+        bundle = self._store.get_task_bundle(
+            approval["task_id"],
+            expected_user_id=expected_user_id,
+        )
         if learning is not None:
             bundle["preference_learning"] = learning
         return bundle

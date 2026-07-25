@@ -1,3 +1,3 @@
 """PersonaOS release version shared by Python runtime surfaces."""
 
-VERSION = "0.11.0"
+VERSION = "0.12.0"

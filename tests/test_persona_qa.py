@@ -55,6 +55,7 @@ def persona_qa_container(
 async def test_review_gates_retrieval_and_answer_citations_are_resolvable(
     persona_qa_container: Container,
     monkeypatch,
+    authenticate_client,
 ) -> None:
     private_source = "2025-03-04，我加入 PersonaOS 项目，负责可追溯记忆系统设计。"
     app = create_app(persona_qa_container)
@@ -63,6 +64,7 @@ async def test_review_gates_retrieval_and_answer_citations_are_resolvable(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, persona_qa_container)
         created = await client.post(
             "/api/v1/personas",
             json={"display_name": "引用测试人物"},
@@ -305,6 +307,7 @@ def test_citation_validator_rejects_model_fabrication() -> None:
 @pytest.mark.asyncio
 async def test_revectorization_is_audited_idempotent_background_work(
     persona_qa_container: Container,
+    authenticate_client,
 ) -> None:
     access = persona_qa_container.persona_access
     memory = _seed_confirmed_memory(
@@ -325,6 +328,7 @@ async def test_revectorization_is_audited_idempotent_background_work(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, persona_qa_container)
         first = await client.post(
             f"/api/v1/personas/{memory['persona_id']}/memories/reindex",
             headers={"Idempotency-Key": "embedding-model-change-1"},

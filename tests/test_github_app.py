@@ -157,7 +157,9 @@ async def test_github_app_signs_jwt_and_caches_scoped_installation_token() -> No
 
 
 @pytest.mark.asyncio
-async def test_github_connection_drives_worker_without_persisting_secrets() -> None:
+async def test_github_connection_drives_worker_without_persisting_secrets(
+    authenticate_client,
+) -> None:
     private_key, _ = generate_rsa_keys()
     now = datetime(2026, 7, 21, 9, 0, tzinfo=UTC)
     installation_secret = "installation-secret-never-persist"
@@ -252,13 +254,13 @@ async def test_github_connection_drives_worker_without_persisting_secrets() -> N
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
         ) as client:
+            await authenticate_client(client, container, account_id="shaun")
             health = await client.get("/health")
             assert health.json()["github_auth"] == "github_app"
 
             connected = await client.post(
                 "/api/v1/github/connections",
                 json={
-                    "user_id": "shaun",
                     "installation_id": 9876,
                     "repository": "example/project",
                 },
@@ -287,7 +289,6 @@ async def test_github_connection_drives_worker_without_persisting_secrets() -> N
                 headers={"Idempotency-Key": "private-project-brief"},
                 json={
                     "github_connection_id": connection["id"],
-                    "user_id": "shaun",
                     "max_items": 20,
                 },
             )
@@ -315,28 +316,19 @@ async def test_github_connection_drives_worker_without_persisting_secrets() -> N
             assert trace.json()["task"]["status"] == "awaiting_approval"
             assert trace.json()["tool_calls"][0]["status"] == "completed"
 
-            wrong_user_disconnect = await client.delete(
-                f"/api/v1/github/connections/{connection['id']}",
-                params={"user_id": "other-user"},
-            )
-            assert wrong_user_disconnect.status_code == 404
-
             disconnected = await client.delete(
                 f"/api/v1/github/connections/{connection['id']}",
-                params={"user_id": "shaun"},
             )
             assert disconnected.status_code == 200
             assert disconnected.json()["status"] == "disconnected"
 
             active_connections = await client.get(
                 "/api/v1/github/connections",
-                params={"user_id": "shaun"},
             )
             assert active_connections.json() == []
             all_connections = await client.get(
                 "/api/v1/github/connections",
                 params={
-                    "user_id": "shaun",
                     "include_disconnected": True,
                 },
             )
@@ -346,7 +338,6 @@ async def test_github_connection_drives_worker_without_persisting_secrets() -> N
                 "/api/v1/tasks/project-maintenance",
                 json={
                     "github_connection_id": connection["id"],
-                    "user_id": "shaun",
                 },
             )
             assert cannot_reuse.status_code == 422
@@ -368,16 +359,17 @@ async def test_github_connection_drives_worker_without_persisting_secrets() -> N
 @pytest.mark.asyncio
 async def test_github_connection_requires_app_configuration(
     container: Container,
+    authenticate_client,
 ) -> None:
     app = create_app(container)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, container, account_id="shaun")
         response = await client.post(
             "/api/v1/github/connections",
             json={
-                "user_id": "shaun",
                 "installation_id": 9876,
                 "repository": "example/project",
             },

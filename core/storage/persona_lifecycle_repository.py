@@ -74,7 +74,7 @@ class PersonaLifecycleRepository:
         allowed_model_boundaries: list[str],
         external_data_acknowledged: bool,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             persona = self._owned_persona_for_update(
                 session,
                 access,
@@ -127,7 +127,7 @@ class PersonaLifecycleRepository:
         sensitivity: str | None,
         reason: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             memory = self._owned_memory_for_update(session, access, memory_id)
             if memory.status != "confirmed":
                 raise ValueError(
@@ -297,7 +297,7 @@ class PersonaLifecycleRepository:
             raise ValueError(f"Unsupported memory relation: {relation}")
         if not 0.0 <= confidence <= 1.0:
             raise ValueError("Relation confidence must be between 0 and 1")
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             from_memory = self._owned_memory(session, access, from_memory_id)
             to_memory = self._owned_memory(session, access, to_memory_id)
@@ -360,7 +360,7 @@ class PersonaLifecycleRepository:
         *,
         memory_id: str,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             memory = self._owned_memory(session, access, memory_id)
             records = list(
                 session.scalars(
@@ -387,7 +387,7 @@ class PersonaLifecycleRepository:
         *,
         relation_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             receipt = self._deletion_receipt(
                 session,
                 access,
@@ -432,7 +432,7 @@ class PersonaLifecycleRepository:
         *,
         memory_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             receipt = self._deletion_receipt(
                 session,
                 access,
@@ -511,7 +511,7 @@ class PersonaLifecycleRepository:
         *,
         document_id: str,
     ) -> dict[str, Any] | None:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             return self._deletion_receipt(
                 session,
                 access,
@@ -526,7 +526,10 @@ class PersonaLifecycleRepository:
         document_id: str,
         ingestion_task_settled: bool = False,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        # Blob object keys are content-addressed across accounts. This system
+        # transaction performs one global reference count after the explicit
+        # owner check so deleting one account cannot remove another's blob.
+        with self.database.session(system=True) as session:
             document = self._owned_document_for_update(
                 session,
                 access,
@@ -569,7 +572,7 @@ class PersonaLifecycleRepository:
         blob_deleted: bool,
         blob_shared: bool,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             receipt = self._deletion_receipt(
                 session,
                 access,
@@ -724,7 +727,7 @@ class PersonaLifecycleRepository:
         *,
         persona_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             persona = self._owned_persona(session, access, persona_id)
             documents = list(
                 session.scalars(
@@ -951,7 +954,7 @@ class PersonaLifecycleRepository:
         byte_size: int,
         included_raw_sources: bool,
     ) -> str:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             return self._add_audit(
                 session,

@@ -276,6 +276,7 @@ async def test_ingestion_failure_does_not_leak_raw_source(
 @pytest.mark.asyncio
 async def test_persona_evidence_loop_is_idempotent_and_auditable(
     persona_container: Container,
+    authenticate_client,
 ) -> None:
     first_section = (
         "2025-03-04，我加入 PersonaOS 项目，并负责整理可追溯的技术决策。"
@@ -292,6 +293,7 @@ async def test_persona_evidence_loop_is_idempotent_and_auditable(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, persona_container)
         created = await client.post(
             "/api/v1/personas",
             headers={"X-Request-ID": "persona-create-1"},

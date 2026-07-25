@@ -9,6 +9,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
 from core.config import Settings
+from core.storage.database import Database
 from core.storage.migration_bootstrap import main, prepare_startup_database
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +28,7 @@ def test_startup_bootstrap_migrates_a_fresh_database(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
         )
     assert "persona_memory_relations" in inspect(engine).get_table_names()
     engine.dispose()
@@ -83,7 +84,7 @@ def test_startup_bootstrap_recognizes_unversioned_m2_and_upgrades(
     assert "allowed_model_boundaries" in columns
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
         )
         policy = connection.scalar(
             text(
@@ -132,6 +133,46 @@ def test_startup_bootstrap_rejects_partial_unversioned_m3(
 
     with pytest.raises(RuntimeError, match="partial M3"):
         prepare_startup_database(settings, project_root=PROJECT_ROOT)
+    engine.dispose()
+
+
+def test_startup_bootstrap_recognizes_unversioned_current_schema(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'current-create-all.db'}"
+    settings = _settings(monkeypatch, database_url)
+    database = Database(database_url)
+    database.create_schema()
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users ("
+                "id, display_name, role, status, failed_login_count, "
+                "created_at, updated_at"
+                ") VALUES ("
+                "'legacy', 'Legacy', 'legacy', 'legacy', 0, "
+                "'2026-07-25T00:00:00Z', '2026-07-25T00:00:00Z'"
+                ")"
+            )
+        )
+    database.engine.dispose()
+
+    mode = prepare_startup_database(settings, project_root=PROJECT_ROOT)
+
+    assert mode == "migrated"
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0004"
+        )
+        assert (
+            connection.scalar(
+                text("SELECT status FROM users WHERE id = 'legacy'")
+            )
+            == "legacy"
+        )
     engine.dispose()
 
 

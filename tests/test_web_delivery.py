@@ -13,7 +13,7 @@ def test_web_dependencies_are_locked_and_build_is_reproducible() -> None:
         (WEB_ROOT / "package-lock.json").read_text(encoding="utf-8")
     )
 
-    assert package["version"] == "0.11.0"
+    assert package["version"] == "0.12.0"
     assert package["engines"]["node"] == ">=22.12"
     assert package["scripts"]["build"] == "tsc -b && vite build"
     assert package["scripts"]["test"] == "vitest run"

@@ -58,7 +58,10 @@ class PersonalizationService:
         *,
         expected_user_id: str | None = None,
     ) -> dict[str, Any]:
-        bundle = self._store.get_task_bundle(task_id)
+        bundle = self._store.get_task_bundle(
+            task_id,
+            expected_user_id=expected_user_id,
+        )
         task = bundle["task"]
         user_id = str(task["user_id"])
         if expected_user_id is not None and user_id != expected_user_id:
@@ -123,13 +126,18 @@ class PersonalizationService:
         *,
         comment: str,
         rating: int | None,
+        expected_user_id: str | None = None,
     ) -> dict[str, Any]:
         feedback_id = self._store.add_feedback(
             task_id,
             comment=comment,
             rating=rating,
+            expected_user_id=expected_user_id,
         )
-        task = self._store.get_task_for_execution(task_id)
+        task = self._store.get_task_bundle(
+            task_id,
+            expected_user_id=expected_user_id,
+        )["task"]
         learning = self.learn_from_task(
             task_id,
             expected_user_id=str(task["user_id"]),

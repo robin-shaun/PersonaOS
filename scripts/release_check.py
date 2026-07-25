@@ -16,7 +16,7 @@ import yaml
 from export_openapi import canonical_schema_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.11.0"
+EXPECTED_VERSION = "0.12.0"
 EXPECTED_PYTHON_IMAGE = (
     "python:3.11.15-slim-bookworm@"
     "sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba"
@@ -44,7 +44,7 @@ REQUIRED_FILES = (
     "docs/api.md",
     "docs/architecture.svg",
     "docs/openapi.json",
-    "docs/releases/v0.11.0.md",
+    "docs/releases/v0.12.0.md",
     "docs/skill-development.md",
     "requirements.lock",
     "requirements-dev.lock",
@@ -245,6 +245,7 @@ def check_ci_supply_chain() -> None:
         "pip-audit --require-hashes -r requirements.lock",
         "npm audit --audit-level=high",
         "python3 examples/compose_smoke.py",
+        "python examples/postgres_rls_smoke.py",
     ):
         require(gate in workflow, f"CI is missing gate: {gate}")
 

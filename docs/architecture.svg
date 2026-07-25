@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1020" viewBox="0 0 1600 1020" role="img" aria-labelledby="title description">
-  <title id="title">PersonaOS 0.11.0 本地优先证据架构</title>
-  <desc id="description">浏览器通过非 root Web 和 FastAPI 访问模块化应用核心；API 与 Worker 使用 PostgreSQL、pgvector 和加密 Blob，人物资料经过候选、人工确认、索引、检索和引用回答，所有重要操作进入审计。模型、GitHub 与未来数字人通过可替换适配器连接。</desc>
+  <title id="title">PersonaOS 0.12.0 可信本地账户与证据架构</title>
+  <desc id="description">浏览器通过本地账户、可撤销 Cookie、CSRF 和非 root Web 访问 FastAPI；应用 owner 过滤与 PostgreSQL 行级安全隔离账户，人物资料经过候选、人工确认、索引、检索和引用回答，重要操作进入审计。模型、GitHub 与未来数字人通过可替换适配器连接。</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#f4f7f4"/>
@@ -34,7 +34,7 @@
   <rect width="1600" height="1020" rx="24" fill="url(#background)"/>
   <rect x="32" y="28" width="1536" height="116" rx="20" fill="url(#hero)"/>
   <text class="title" x="72" y="78">PersonaOS · Evidence before imitation</text>
-  <text class="subtitle" x="72" y="110">0.11.0 模块化单体 · 本地单所有者 · 人工审核优先 · 无付费模型也可运行</text>
+  <text class="subtitle" x="72" y="110">0.12.0 模块化单体 · 可信本地账户 · 双层 owner 隔离 · 无付费模型也可运行</text>
   <g transform="translate(1275 54)">
     <rect width="248" height="62" rx="14" fill="#ffffff" fill-opacity="0.1" stroke="#9bc8bb" stroke-opacity="0.5"/>
     <circle cx="28" cy="31" r="10" fill="#9ce0c8"/>
@@ -46,18 +46,18 @@
   <g filter="url(#shadow)">
     <rect x="52" y="204" width="204" height="106" rx="16" fill="#ffffff" stroke="#b7cbc5"/>
     <text class="box-title" x="76" y="239">用户 / 审核者</text>
-    <text class="box-copy" x="76" y="264">创建人物 · 上传资料</text>
+    <text class="box-copy" x="76" y="264">登录账户 · 创建人物 · 上传资料</text>
     <text class="box-copy" x="76" y="285">逐条确认 · 查看引用与审计</text>
 
     <rect x="312" y="204" width="230" height="106" rx="16" fill="#ffffff" stroke="#b7cbc5"/>
     <text class="box-title" x="336" y="239">React Web</text>
-    <text class="box-copy" x="336" y="264">非 root Nginx · CSP</text>
-    <text class="box-copy" x="336" y="285">同源 /api 代理 · 不持有密钥</text>
+    <text class="box-copy" x="336" y="264">HttpOnly Cookie · 内存态 CSRF</text>
+    <text class="box-copy" x="336" y="285">同源 /api 代理 · 不持久化凭据</text>
 
     <rect x="598" y="204" width="230" height="106" rx="16" fill="#ffffff" stroke="#77a598" stroke-width="2"/>
     <text class="box-title" x="622" y="239">FastAPI /api/v1</text>
-    <text class="box-copy" x="622" y="264">owner 与数据边界门禁</text>
-    <text class="box-copy" x="622" y="285">OpenAPI · 请求 ID · 高风险确认</text>
+    <text class="box-copy" x="622" y="264">可信会话 → owner / actor</text>
+    <text class="box-copy" x="622" y="285">CSRF · Origin · 近期再认证</text>
 
     <rect x="884" y="204" width="230" height="106" rx="16" fill="#ffffff" stroke="#b7cbc5"/>
     <text class="box-title" x="908" y="239">持久化 Worker</text>
@@ -73,9 +73,9 @@
     <rect x="52" y="378" width="1062" height="326" rx="20" fill="#ffffff" stroke="#a9c1ba"/>
 
     <rect x="78" y="414" width="232" height="112" rx="14" fill="#eef6f2" stroke="#b4cec5"/>
-    <text class="box-title" x="98" y="447">Persona / Identity</text>
-    <text class="box-copy" x="98" y="472">档案 · owner · 模拟声明</text>
-    <text class="box-copy" x="98" y="493">敏感等级 · 模型数据策略</text>
+    <text class="box-title" x="98" y="447">Account / Persona Identity</text>
+    <text class="box-copy" x="98" y="472">Argon2id · 会话 · owner · 模拟声明</text>
+    <text class="box-copy" x="98" y="493">权限 · 敏感等级 · 模型数据策略</text>
 
     <rect x="336" y="414" width="232" height="112" rx="14" fill="#eef6f2" stroke="#b4cec5"/>
     <text class="box-title" x="356" y="447">Knowledge Ingestion</text>
@@ -146,7 +146,7 @@
     <rect x="52" y="774" width="488" height="106" rx="16" fill="#173d34"/>
     <text class="box-title" x="78" y="808" style="fill:#ffffff">PostgreSQL 17 + pgvector</text>
     <text class="box-copy" x="78" y="833" style="fill:#d5e8e2">结构化领域记录 · 全文索引 · embedding 空间</text>
-    <text class="box-copy" x="78" y="854" style="fill:#d5e8e2">Alembic migration · owner/persona/敏感等级过滤</text>
+    <text class="box-copy" x="78" y="854" style="fill:#d5e8e2">Alembic · FORCE RLS · owner/persona/敏感等级过滤</text>
 
     <rect x="570" y="774" width="350" height="106" rx="16" fill="#173d34"/>
     <text class="box-title" x="596" y="808" style="fill:#ffffff">Encrypted BlobStore</text>
@@ -156,7 +156,7 @@
     <rect x="950" y="774" width="598" height="106" rx="16" fill="#ffffff" stroke="#b7cbc5"/>
     <text class="box-title" x="976" y="808">Local-first deployment</text>
     <text class="box-copy" x="976" y="833">Compose：db + API + Worker + Web；端口只绑定回环地址</text>
-    <text class="box-copy" x="976" y="854">SQLite：轻量开发/测试兼容，不是远程多租户数据平面</text>
+    <text class="box-copy" x="976" y="854">SQLite：应用隔离测试，无 RLS；本地认证不是公网身份平台</text>
   </g>
   <path class="arrow" d="M394 704 V752 Q394 764 382 764 V774"/>
   <path class="arrow" d="M710 704 V764 H710 V774"/>

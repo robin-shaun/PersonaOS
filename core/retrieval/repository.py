@@ -125,7 +125,7 @@ class PersonaRetrievalRepository:
         *,
         persona_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             persona = self._owned_persona(
                 session,
                 access,
@@ -145,7 +145,7 @@ class PersonaRetrievalRepository:
         *,
         conversation_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             conversation = self._owned_conversation(
                 session,
                 access,
@@ -171,7 +171,7 @@ class PersonaRetrievalRepository:
         access: AccessContext,
         memory_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             memory = session.get(PersonaMemoryRecord, memory_id)
             if (
                 memory is None
@@ -215,7 +215,7 @@ class PersonaRetrievalRepository:
         persona_id: str,
         allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id, require_active=True)
             rows = list(
                 session.execute(
@@ -283,7 +283,7 @@ class PersonaRetrievalRepository:
         if not indexable:
             return []
         version_ids = [str(item["memory_version_id"]) for item in indexable]
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             existing = set(
                 session.scalars(
                     select(PersonaMemoryEmbeddingRecord.memory_version_id).where(
@@ -310,7 +310,7 @@ class PersonaRetrievalRepository:
         indexable: dict[str, Any],
         embedding_space_id: str,
     ) -> dict[str, Any] | None:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             record = session.scalar(
                 select(PersonaMemoryEmbeddingRecord).where(
                     PersonaMemoryEmbeddingRecord.owner_id == access.owner_id,
@@ -343,7 +343,7 @@ class PersonaRetrievalRepository:
                 f"Embedding has {len(embedding)} dimensions; "
                 f"space {space.id} requires {space.dimensions}"
             )
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             memory = session.get(
                 PersonaMemoryRecord,
                 str(indexable["memory_id"]),
@@ -417,7 +417,7 @@ class PersonaRetrievalRepository:
         minimum_score: float,
         allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id, require_active=True)
             if session.bind is not None and session.bind.dialect.name == "postgresql":
                 searchable = func.concat_ws(
@@ -518,7 +518,7 @@ class PersonaRetrievalRepository:
         minimum_similarity: float,
         allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id, require_active=True)
             space = session.get(EmbeddingSpaceRecord, embedding_space_id)
             if space is None or space.status != "active":
@@ -632,7 +632,7 @@ class PersonaRetrievalRepository:
     ) -> dict[str, dict[str, Any]]:
         if not version_ids:
             return {}
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id, require_active=True)
             output: dict[str, dict[str, Any]] = {}
             for version_id in version_ids:
@@ -712,7 +712,7 @@ class PersonaRetrievalRepository:
         persona_id: str,
         title: str | None,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             persona = self._owned_persona(
                 session,
                 access,
@@ -746,7 +746,7 @@ class PersonaRetrievalRepository:
         *,
         conversation_id: str,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             conversation = self._owned_conversation(
                 session,
                 access,
@@ -774,7 +774,7 @@ class PersonaRetrievalRepository:
         conversation_id: str,
         content: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             conversation = self._owned_conversation(
                 session,
                 access,
@@ -810,7 +810,7 @@ class PersonaRetrievalRepository:
         allowed_sensitivities: tuple[str, ...],
         model_evidence_projection: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             conversation = self._owned_conversation(
                 session,
                 access,
@@ -873,7 +873,7 @@ class PersonaRetrievalRepository:
         request_hash: str,
         latency_ms: int,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             conversation = self._owned_conversation(
                 session,
                 access,
@@ -981,7 +981,7 @@ class PersonaRetrievalRepository:
         answer: str,
         request_hash: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             conversation = self._owned_conversation(
                 session,
                 access,
@@ -1062,7 +1062,7 @@ class PersonaRetrievalRepository:
         *,
         message_id: str,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             message = session.get(ConversationMessageRecord, message_id)
             if (
                 message is None
@@ -1094,7 +1094,7 @@ class PersonaRetrievalRepository:
         created_count: int,
         task_id: str | None,
     ) -> None:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             self._add_audit(
                 session,
@@ -1125,7 +1125,7 @@ class PersonaRetrievalRepository:
         embedding_space_id: str,
         created: bool,
     ) -> None:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             self._add_audit(
                 session,

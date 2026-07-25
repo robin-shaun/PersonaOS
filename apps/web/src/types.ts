@@ -9,11 +9,43 @@ export type MemoryStatus =
 
 export interface Health {
   status: string;
+  version: string;
   runtime: string;
-  queue: Record<string, number>;
   persona_identity_mode: string;
+  account_setup_required: boolean;
   persona_blob_encryption: string;
   persona_embedding_space_id: string;
+}
+
+export interface AuthenticationStatus {
+  mode: "trusted_local_accounts";
+  setup_required: boolean;
+  cookie_secure: boolean;
+  local_only: boolean;
+}
+
+export interface Account {
+  id: string;
+  username: string;
+  display_name: string;
+  role: "admin" | "member";
+  status: "active" | "disabled";
+  created_at: string;
+  updated_at: string;
+  password_changed_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface AuthenticatedSession {
+  account: Account;
+  session: {
+    id: string;
+    idle_expires_at: string;
+    absolute_expires_at: string;
+    reauthenticated_at: string;
+  };
+  csrf_token: string;
+  reauthentication_window_seconds: number;
 }
 
 export interface Persona {

@@ -1,6 +1,9 @@
 import type {
+  Account,
   AnswerResult,
   AuditEvent,
+  AuthenticatedSession,
+  AuthenticationStatus,
   CitationBundle,
   Conversation,
   ConversationMessage,
@@ -22,6 +25,8 @@ import type {
 
 const configuredBase = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
 const API_BASE = configuredBase.replace(/\/+$/, "");
+const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+let csrfToken = "";
 
 export class ApiError extends Error {
   constructor(
@@ -69,13 +74,18 @@ export async function request<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(init.headers);
+  const method = (init.method ?? "GET").toUpperCase();
   headers.set("Accept", "application/json");
   headers.set("X-Request-ID", requestId());
+  if (unsafeMethods.has(method) && csrfToken) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: "same-origin",
     headers,
   });
   const contentType = response.headers.get("content-type") ?? "";
@@ -83,6 +93,25 @@ export async function request<T>(
     ? await response.json()
     : await response.text();
   if (!response.ok) {
+    const invalidSession =
+      response.status === 401 &&
+      path !== "/api/v1/auth/login" &&
+      path !== "/api/v1/auth/reauthenticate";
+    if (invalidSession) {
+      csrfToken = "";
+      window.dispatchEvent(
+        new CustomEvent("personaos:authentication-required", {
+          detail: { path },
+        }),
+      );
+    }
+    if (response.status === 428) {
+      window.dispatchEvent(
+        new CustomEvent("personaos:reauthentication-required", {
+          detail: { path },
+        }),
+      );
+    }
     throw new ApiError(response.status, errorMessage(payload, response.status), payload);
   }
   return payload as T;
@@ -90,6 +119,62 @@ export async function request<T>(
 
 export const api = {
   health: () => request<Health>("/health"),
+
+  authenticationStatus: () =>
+    request<AuthenticationStatus>("/api/v1/auth/status"),
+
+  getSession: async () => {
+    const result = await request<AuthenticatedSession>("/api/v1/auth/session");
+    csrfToken = result.csrf_token;
+    return result;
+  },
+
+  login: async (username: string, password: string) => {
+    const result = await request<AuthenticatedSession>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    csrfToken = result.csrf_token;
+    return result;
+  },
+
+  reauthenticate: async (password: string) => {
+    const result = await request<AuthenticatedSession>(
+      "/api/v1/auth/reauthenticate",
+      {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      },
+    );
+    csrfToken = result.csrf_token;
+    return result;
+  },
+
+  logout: async () => {
+    try {
+      await request<void>("/api/v1/auth/logout", { method: "POST" });
+    } finally {
+      csrfToken = "";
+    }
+  },
+
+  listAccounts: () => request<Account[]>("/api/v1/accounts"),
+
+  createAccount: (
+    username: string,
+    displayName: string,
+    password: string,
+    role: "admin" | "member",
+  ) =>
+    request<Account>("/api/v1/accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        display_name: displayName,
+        password,
+        role,
+      }),
+    }),
 
   listPersonas: () => request<Persona[]>("/api/v1/personas"),
 
@@ -314,7 +399,7 @@ export const api = {
       `/api/v1/tasks/${encodeURIComponent(taskId)}/cancel`,
       {
         method: "POST",
-        body: JSON.stringify({ reason, requested_by: "personaos-web" }),
+        body: JSON.stringify({ reason }),
       },
     ),
 };

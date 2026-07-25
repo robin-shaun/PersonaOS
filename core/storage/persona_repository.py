@@ -72,7 +72,7 @@ class PersonaRepository:
     ) -> dict[str, Any]:
         persona_id = _new_id()
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._ensure_user(session, access.owner_id)
             persona = PersonaRecord(
                 id=persona_id,
@@ -113,7 +113,7 @@ class PersonaRepository:
         *,
         include_inactive: bool = False,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             statement = select(PersonaRecord).where(
                 PersonaRecord.owner_id == access.owner_id
             )
@@ -131,7 +131,7 @@ class PersonaRepository:
         *,
         require_active: bool = False,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             persona = self._owned_persona(
                 session,
                 access,
@@ -153,7 +153,7 @@ class PersonaRepository:
         language: str | None,
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(
                 session,
                 access,
@@ -214,7 +214,7 @@ class PersonaRepository:
         *,
         task_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             document = self._owned_document(session, access, document_id)
             if document.task_id is None:
                 document.task_id = task_id
@@ -233,7 +233,7 @@ class PersonaRepository:
         *,
         include_chunks: bool = True,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             document = self._owned_document(session, access, document_id)
             chunks = (
                 list(
@@ -257,7 +257,7 @@ class PersonaRepository:
         *,
         persona_id: str,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             documents = session.scalars(
                 select(SourceDocumentRecord)
@@ -276,7 +276,7 @@ class PersonaRepository:
         owner_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=owner_id) as session:
             document = session.get(SourceDocumentRecord, document_id)
             if document is None or document.owner_id != owner_id:
                 raise KeyError(f"SourceDocumentRecord not found: {document_id}")
@@ -288,7 +288,7 @@ class PersonaRepository:
         owner_id: str,
         document_id: str,
     ) -> None:
-        with self.database.session() as session:
+        with self.database.session(owner_id=owner_id) as session:
             document = session.get(SourceDocumentRecord, document_id)
             if document is None or document.owner_id != owner_id:
                 raise KeyError(f"SourceDocumentRecord not found: {document_id}")
@@ -310,7 +310,7 @@ class PersonaRepository:
         task_run_id: str,
         error: str,
     ) -> None:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             document = self._owned_document(session, access, document_id)
             if document.status == "ready":
                 return
@@ -342,7 +342,7 @@ class PersonaRepository:
         candidates: list[MemoryCandidateDraft],
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             document = self._owned_document(session, access, document_id)
             persona = self._owned_persona(
                 session,
@@ -540,7 +540,7 @@ class PersonaRepository:
             "deleted",
         }:
             raise ValueError(f"Unsupported persona memory status: {status}")
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             memories = list(
                 session.scalars(
@@ -563,7 +563,7 @@ class PersonaRepository:
         access: AccessContext,
         memory_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             memory = self._owned_memory(session, access, memory_id)
             return self._memory_bundle(session, memory)
 
@@ -582,7 +582,7 @@ class PersonaRepository:
             raise ValueError("edited_content is only valid when confirming")
         target_status = "confirmed" if action == "confirm" else "rejected"
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             memory = self._owned_memory_for_update(
                 session,
                 access,
@@ -724,7 +724,7 @@ class PersonaRepository:
         persona_id: str,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=access.owner_id) as session:
             self._owned_persona(session, access, persona_id)
             records = list(
                 session.scalars(

@@ -1,7 +1,47 @@
 {
   "components": {
     "schemas": {
+      "AccountCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 1024,
+            "minLength": 15,
+            "title": "Password",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 32,
+            "minLength": 3,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "display_name",
+          "password"
+        ],
+        "title": "AccountCreateRequest",
+        "type": "object"
+      },
       "ApprovalDecisionRequest": {
+        "additionalProperties": false,
         "properties": {
           "decision": {
             "enum": [
@@ -58,6 +98,7 @@
         "type": "object"
       },
       "FeedbackCreate": {
+        "additionalProperties": false,
         "properties": {
           "comment": {
             "maxLength": 4000,
@@ -86,6 +127,7 @@
         "type": "object"
       },
       "GitHubConnectionCreate": {
+        "additionalProperties": false,
         "properties": {
           "installation_id": {
             "maximum": 9.223372036854776e+18,
@@ -100,13 +142,6 @@
             "maxLength": 200,
             "minLength": 3,
             "title": "Repository",
-            "type": "string"
-          },
-          "user_id": {
-            "default": "local-user",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "User Id",
             "type": "string"
           }
         },
@@ -130,7 +165,31 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
       "PersonaConversationCreate": {
+        "additionalProperties": false,
         "properties": {
           "title": {
             "anyOf": [
@@ -149,6 +208,7 @@
         "type": "object"
       },
       "PersonaCreate": {
+        "additionalProperties": false,
         "properties": {
           "description": {
             "default": "",
@@ -170,6 +230,7 @@
         "type": "object"
       },
       "PersonaExportRequest": {
+        "additionalProperties": false,
         "properties": {
           "include_raw_sources": {
             "default": true,
@@ -181,6 +242,7 @@
         "type": "object"
       },
       "PersonaMemoryRelationCreate": {
+        "additionalProperties": false,
         "properties": {
           "confidence": {
             "default": 1.0,
@@ -229,6 +291,7 @@
         "type": "object"
       },
       "PersonaMemoryReviewRequest": {
+        "additionalProperties": false,
         "properties": {
           "action": {
             "enum": [
@@ -270,6 +333,7 @@
         "type": "object"
       },
       "PersonaMemoryUpdateRequest": {
+        "additionalProperties": false,
         "properties": {
           "content": {
             "anyOf": [
@@ -319,6 +383,7 @@
         "type": "object"
       },
       "PersonaModelPolicyUpdateRequest": {
+        "additionalProperties": false,
         "properties": {
           "allowed_model_boundaries": {
             "items": {
@@ -346,6 +411,7 @@
         "type": "object"
       },
       "PersonaQuestionCreate": {
+        "additionalProperties": false,
         "properties": {
           "content": {
             "maxLength": 10000,
@@ -368,6 +434,7 @@
         "type": "object"
       },
       "PreferenceReviewRequest": {
+        "additionalProperties": false,
         "properties": {
           "action": {
             "enum": [
@@ -401,22 +468,16 @@
               }
             ],
             "title": "Reason"
-          },
-          "user_id": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "User Id",
-            "type": "string"
           }
         },
         "required": [
-          "user_id",
           "action"
         ],
         "title": "PreferenceReviewRequest",
         "type": "object"
       },
       "ProjectMaintenanceTaskCreate": {
+        "additionalProperties": false,
         "properties": {
           "employee_id": {
             "default": "github-maintainer-001",
@@ -461,13 +522,6 @@
             ],
             "title": "Repository"
           },
-          "user_id": {
-            "default": "local-user",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "User Id",
-            "type": "string"
-          },
           "workflow_name": {
             "default": "daily-project-maintenance",
             "maxLength": 120,
@@ -479,20 +533,30 @@
         "title": "ProjectMaintenanceTaskCreate",
         "type": "object"
       },
+      "ReauthenticationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "ReauthenticationRequest",
+        "type": "object"
+      },
       "TaskCancellationRequest": {
+        "additionalProperties": false,
         "properties": {
           "reason": {
             "default": "cancelled by user",
             "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",
-            "type": "string"
-          },
-          "requested_by": {
-            "default": "api",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Requested By",
             "type": "string"
           }
         },
@@ -539,15 +603,101 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "CsrfToken": {
+        "description": "Session-bound token required with authenticated unsafe methods.",
+        "in": "header",
+        "name": "X-CSRF-Token",
+        "type": "apiKey"
+      },
+      "PersonaSession": {
+        "description": "Opaque revocable local session cookie.",
+        "in": "cookie",
+        "name": "personaos_session",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
     "description": "Evidence-driven digital employee and review-first persona memory with versioned edits, model data boundaries and auditable deletion.",
     "title": "PersonaOS",
-    "version": "0.11.0"
+    "version": "0.12.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/accounts": {
+      "get": {
+        "operationId": "list_accounts_api_v1_accounts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Accounts Api V1 Accounts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
+        "summary": "List Accounts"
+      },
+      "post": {
+        "operationId": "create_account_api_v1_accounts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Account Api V1 Accounts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
+        "summary": "Create Account"
+      }
+    },
     "/api/v1/approvals/{approval_id}/decision": {
       "post": {
         "operationId": "decide_approval_api_v1_approvals__approval_id__decision_post",
@@ -596,7 +746,161 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Decide Approval"
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Login Api V1 Auth Login Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login"
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
+        "summary": "Logout"
+      }
+    },
+    "/api/v1/auth/reauthenticate": {
+      "post": {
+        "operationId": "reauthenticate_api_v1_auth_reauthenticate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthenticationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reauthenticate Api V1 Auth Reauthenticate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
+        "summary": "Reauthenticate"
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "operationId": "get_authenticated_session_api_v1_auth_session_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Authenticated Session Api V1 Auth Session Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
+        "summary": "Get Authenticated Session"
+      }
+    },
+    "/api/v1/auth/status": {
+      "get": {
+        "operationId": "authentication_status_api_v1_auth_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Authentication Status Api V1 Auth Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Authentication Status"
       }
     },
     "/api/v1/conversations/{conversation_id}/messages": {
@@ -640,6 +944,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Persona Conversation Messages"
       },
       "post": {
@@ -689,6 +998,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Ask Persona"
       }
     },
@@ -740,6 +1055,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Delete Persona Document"
       },
       "get": {
@@ -779,6 +1100,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Get Persona Document"
       }
     },
@@ -802,6 +1128,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Employees"
       }
     },
@@ -809,17 +1140,6 @@
       "get": {
         "operationId": "list_github_connections_api_v1_github_connections_get",
         "parameters": [
-          {
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          },
           {
             "in": "query",
             "name": "include_disconnected",
@@ -858,6 +1178,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Github Connections"
       },
       "post": {
@@ -896,6 +1221,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Create Github Connection"
       }
     },
@@ -909,17 +1240,6 @@
             "required": true,
             "schema": {
               "title": "Connection Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "User Id",
               "type": "string"
             }
           }
@@ -948,6 +1268,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Disconnect Github Connection"
       }
     },
@@ -999,6 +1325,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Delete Persona Memory"
       },
       "get": {
@@ -1038,6 +1370,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Get Persona Memory"
       },
       "patch": {
@@ -1087,6 +1424,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Update Persona Memory"
       }
     },
@@ -1131,6 +1474,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Persona Memory Relations"
       }
     },
@@ -1182,6 +1530,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Review Persona Memory"
       }
     },
@@ -1233,6 +1587,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Delete Persona Memory Relation"
       }
     },
@@ -1277,6 +1637,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Get Persona Answer Citations"
       }
     },
@@ -1322,6 +1687,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Personas"
       },
       "post": {
@@ -1360,6 +1730,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Create Persona"
       }
     },
@@ -1401,6 +1777,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Get Persona"
       }
     },
@@ -1457,6 +1838,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Persona Audit Events"
       }
     },
@@ -1508,6 +1894,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Create Persona Conversation"
       }
     },
@@ -1552,6 +1944,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Persona Documents"
       },
       "post": {
@@ -1618,6 +2015,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Upload Persona Document"
       }
     },
@@ -1669,6 +2072,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Export Persona"
       }
     },
@@ -1723,6 +2132,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Persona Memories"
       }
     },
@@ -1781,6 +2195,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Reindex Persona Memories"
       }
     },
@@ -1825,6 +2245,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Persona Memory Candidates"
       }
     },
@@ -1876,6 +2301,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Create Persona Memory Relation"
       }
     },
@@ -1927,6 +2358,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Update Persona Model Policy"
       }
     },
@@ -1940,17 +2377,6 @@
             "required": true,
             "schema": {
               "title": "Preference Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "minLength": 1,
-              "title": "User Id",
               "type": "string"
             }
           }
@@ -1979,6 +2405,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Get Preference"
       }
     },
@@ -2030,6 +2461,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Review Preference"
       }
     },
@@ -2050,6 +2487,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Runtime Status"
       }
     },
@@ -2073,6 +2515,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Skills"
       }
     },
@@ -2120,6 +2567,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Tasks"
       }
     },
@@ -2179,6 +2631,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Create Project Maintenance Task"
       }
     },
@@ -2220,6 +2678,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "Get Task"
       }
     },
@@ -2271,6 +2734,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Cancel Task"
       }
     },
@@ -2322,6 +2791,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Create Feedback"
       }
     },
@@ -2363,6 +2838,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Retry Task"
       }
     },
@@ -2435,6 +2916,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Memory Sources"
       }
     },
@@ -2511,6 +2997,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "PersonaSession": []
+          }
+        ],
         "summary": "List Preferences"
       }
     },
@@ -2568,6 +3059,12 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
         "summary": "Learn Preferences"
       }
     },

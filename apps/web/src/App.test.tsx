@@ -4,10 +4,36 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import type {
+  Account,
   AnswerResult,
+  AuthenticatedSession,
   MemoryBundle,
   Persona,
 } from "./types";
+
+const account: Account = {
+  id: "local-user",
+  username: "local-admin",
+  display_name: "Local Admin",
+  role: "admin",
+  status: "active",
+  created_at: "2026-07-25T00:00:00+00:00",
+  updated_at: "2026-07-25T00:00:00+00:00",
+  password_changed_at: "2026-07-25T00:00:00+00:00",
+  last_login_at: "2026-07-25T00:00:00+00:00",
+};
+
+const authenticatedSession: AuthenticatedSession = {
+  account,
+  session: {
+    id: "session-1",
+    idle_expires_at: "2026-07-25T01:00:00+00:00",
+    absolute_expires_at: "2026-07-25T12:00:00+00:00",
+    reauthenticated_at: "2026-07-25T00:00:00+00:00",
+  },
+  csrf_token: "csrf-test-token",
+  reauthentication_window_seconds: 300,
+};
 
 const persona: Persona = {
   id: "persona-1",
@@ -108,29 +134,99 @@ function baseRoutes({
   personas = [persona],
   candidates = [],
   answer,
+  authenticated = true,
+  setupRequired = false,
 }: {
   personas?: Persona[];
   candidates?: MemoryBundle[];
   answer?: AnswerResult;
+  authenticated?: boolean;
+  setupRequired?: boolean;
 } = {}) {
-  const calls: Array<{ method: string; path: string; body: unknown }> = [];
+  let signedIn = authenticated;
+  const calls: Array<{
+    method: string;
+    path: string;
+    body: unknown;
+    csrf: string | null;
+  }> = [];
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = new URL(String(input), "http://test");
       const method = init.method ?? "GET";
+      const headers = new Headers(init.headers);
       const body =
         typeof init.body === "string" ? JSON.parse(init.body) : init.body;
-      calls.push({ method, path: `${url.pathname}${url.search}`, body });
+      calls.push({
+        method,
+        path: `${url.pathname}${url.search}`,
+        body,
+        csrf: headers.get("X-CSRF-Token"),
+      });
 
       if (url.pathname === "/health") {
         return json({
           status: "ok",
+          version: "0.12.0",
           runtime: "rules-v1",
-          queue: {},
-          persona_identity_mode: "local_single_owner",
+          persona_identity_mode: "trusted_local_accounts",
+          account_setup_required: setupRequired,
           persona_blob_encryption: "AES-256-GCM",
           persona_embedding_space_id: "space-1",
         });
+      }
+      if (url.pathname === "/api/v1/auth/status") {
+        return json({
+          mode: "trusted_local_accounts",
+          setup_required: setupRequired,
+          cookie_secure: false,
+          local_only: true,
+        });
+      }
+      if (url.pathname === "/api/v1/auth/session") {
+        return signedIn
+          ? json(authenticatedSession)
+          : json({ detail: "authentication required" }, 401);
+      }
+      if (
+        url.pathname === "/api/v1/auth/login" &&
+        method === "POST"
+      ) {
+        signedIn = true;
+        return json(authenticatedSession);
+      }
+      if (
+        url.pathname === "/api/v1/auth/reauthenticate" &&
+        method === "POST"
+      ) {
+        return json({
+          ...authenticatedSession,
+          csrf_token: "rotated-csrf-token",
+          session: {
+            ...authenticatedSession.session,
+            reauthenticated_at: "2026-07-25T00:05:00+00:00",
+          },
+        });
+      }
+      if (url.pathname === "/api/v1/accounts" && method === "GET") {
+        return json([account]);
+      }
+      if (url.pathname === "/api/v1/accounts" && method === "POST") {
+        const payload = body as {
+          username: string;
+          display_name: string;
+          role: "admin" | "member";
+        };
+        return json(
+          {
+            ...account,
+            id: "member-2",
+            username: payload.username,
+            display_name: payload.display_name,
+            role: payload.role,
+          },
+          201,
+        );
       }
       if (url.pathname === "/api/v1/personas" && method === "GET") {
         return json(personas);
@@ -220,6 +316,107 @@ describe("PersonaOS Web", () => {
     vi.clearAllMocks();
   });
 
+  it("logs in before loading protected persona data", async () => {
+    const { calls } = baseRoutes({ authenticated: false });
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "登录本地工作区",
+      }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("用户名"), "local-admin");
+    await user.type(
+      screen.getByLabelText("密码"),
+      "test-strong-password-123",
+    );
+    await user.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "你好，这是 测试人物" }),
+    ).toBeInTheDocument();
+    const loginCall = calls.find(
+      (call) =>
+        call.method === "POST" && call.path === "/api/v1/auth/login",
+    );
+    expect(loginCall?.body).toEqual({
+      username: "local-admin",
+      password: "test-strong-password-123",
+    });
+    expect(
+      calls.find(
+        (call) =>
+          call.method === "GET" && call.path === "/api/v1/personas",
+      ),
+    ).toBeDefined();
+  });
+
+  it("shows trusted-host bootstrap instructions without probing data", async () => {
+    const { calls } = baseRoutes({
+      authenticated: false,
+      setupRequired: true,
+    });
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "先创建首个管理员",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/python -m apps.admin/)).toBeInTheDocument();
+    expect(
+      calls.some((call) => call.path === "/api/v1/auth/session"),
+    ).toBe(false);
+    expect(
+      calls.some((call) => call.path === "/api/v1/personas"),
+    ).toBe(false);
+  });
+
+  it("rotates CSRF before an administrator creates an account", async () => {
+    const { calls } = baseRoutes();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "你好，这是 测试人物" });
+    await user.click(
+      screen.getByRole("button", { name: /账户身份与会话/ }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "账户与会话" }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "重新验证身份" }),
+    );
+    await user.type(
+      screen.getByLabelText("当前密码"),
+      "test-strong-password-123",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "验证并轮换会话" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "重新验证身份" }),
+      ).not.toBeInTheDocument(),
+    );
+
+    await user.type(screen.getByLabelText("用户名"), "new-member");
+    await user.type(screen.getByLabelText("显示名称"), "New Member");
+    await user.type(
+      screen.getByLabelText("初始密码（至少 15 字符）"),
+      "another-strong-password-123",
+    );
+    await user.click(screen.getByRole("button", { name: "创建账户" }));
+
+    expect(await screen.findByText("@new-member")).toBeInTheDocument();
+    const accountCreate = calls.find(
+      (call) =>
+        call.method === "POST" && call.path === "/api/v1/accounts",
+    );
+    expect(accountCreate?.csrf).toBe("rotated-csrf-token");
+  });
+
   it("creates the first persona and opens its evidence workspace", async () => {
     const { calls } = baseRoutes({ personas: [] });
     const user = userEvent.setup();
@@ -249,6 +446,7 @@ describe("PersonaOS Web", () => {
       display_name: "我的分身",
       description: "测试边界",
     });
+    expect(createCall?.csrf).toBe("csrf-test-token");
   });
 
   it("keeps a candidate behind an explicit human review gate", async () => {

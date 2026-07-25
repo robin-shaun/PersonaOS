@@ -44,9 +44,36 @@ class Database:
         Base.metadata.create_all(self.engine)
 
     @contextmanager
-    def session(self) -> Iterator[Session]:
+    def session(
+        self,
+        *,
+        owner_id: str | None = None,
+        system: bool = False,
+    ) -> Iterator[Session]:
+        if owner_id is not None:
+            owner_id = owner_id.strip()
+            if (
+                not owner_id
+                or len(owner_id) > 64
+                or any(character in owner_id for character in "\r\n\t")
+            ):
+                raise ValueError("database owner scope is invalid")
+        if owner_id is not None and system:
+            raise ValueError("database session cannot be owner and system scoped")
         session = self._session_factory()
         try:
+            if self.engine.dialect.name == "postgresql":
+                session.execute(
+                    text(
+                        "SELECT "
+                        "set_config('personaos.system_bypass', :bypass, true), "
+                        "set_config('personaos.owner_id', :owner_id, true)"
+                    ),
+                    {
+                        "bypass": "on" if system else "off",
+                        "owner_id": owner_id or "",
+                    },
+                )
             yield session
             session.commit()
         except Exception:

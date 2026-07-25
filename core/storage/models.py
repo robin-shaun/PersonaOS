@@ -30,11 +30,143 @@ class Base(DeclarativeBase):
 
 class UserRecord(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('legacy', 'admin', 'member')",
+            name="ck_user_role",
+        ),
+        CheckConstraint(
+            "status IN ('legacy', 'active', 'disabled')",
+            name="ck_user_status",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(200))
+    username: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(
+        String(40), default="legacy", index=True, nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(40), default="legacy", index=True, nullable=False
+    )
+    failed_login_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class AuthSessionRecord(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    authenticated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    reauthenticated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    idle_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=False
+    )
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=True
+    )
+    revoke_reason: Mapped[str | None] = mapped_column(
+        String(120), nullable=True
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    user_agent_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+
+
+class AuthEventRecord(Base):
+    __tablename__ = "auth_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True, nullable=False
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), index=True, nullable=True
+    )
+    actor_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    outcome: Mapped[str] = mapped_column(String(40), index=True)
+    subject_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    detail: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+
+
+class LegacyOwnerMigrationRecord(Base):
+    __tablename__ = "legacy_owner_migrations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('applied', 'rolled_back')",
+            name="ck_legacy_owner_migration_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    target_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    manifest: Mapped[dict[str, list[str]]] = mapped_column(
+        JSON, nullable=False
+    )
+    created_by_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    rolled_back_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

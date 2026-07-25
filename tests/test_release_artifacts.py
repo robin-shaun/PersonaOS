@@ -28,9 +28,29 @@ def test_openapi_snapshot_exposes_the_evidence_loop() -> None:
     )
 
     assert schema["info"]["title"] == "PersonaOS"
-    assert schema["info"]["version"] == "0.11.0"
+    assert schema["info"]["version"] == "0.12.0"
+    security_schemes = schema["components"]["securitySchemes"]
+    assert security_schemes["PersonaSession"] == {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "personaos_session",
+        "description": "Opaque revocable local session cookie.",
+    }
+    assert security_schemes["CsrfToken"] == {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CSRF-Token",
+        "description": (
+            "Session-bound token required with authenticated unsafe methods."
+        ),
+    }
     paths = schema["paths"]
+    assert "security" not in paths["/api/v1/auth/login"]["post"]
+    assert "security" not in paths["/api/v1/auth/status"]["get"]
     assert "post" in paths["/api/v1/personas"]
+    assert paths["/api/v1/personas"]["post"]["security"] == [
+        {"PersonaSession": [], "CsrfToken": []}
+    ]
     assert "post" in paths["/api/v1/personas/{persona_id}/documents"]
     assert "post" in paths["/api/v1/memory-candidates/{memory_id}/review"]
     assert "post" in paths["/api/v1/conversations/{conversation_id}/messages"]

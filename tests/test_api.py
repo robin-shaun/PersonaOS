@@ -9,13 +9,17 @@ from core.services.task_queue import TaskWorker
 
 
 @pytest.mark.asyncio
-async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
+async def test_api_runs_task_and_accepts_approval(
+    container: Container,
+    authenticate_client,
+) -> None:
     app = create_app(container)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, container, account_id="shaun")
         health = await client.get("/health")
         assert health.status_code == 200
         assert health.json()["github_mode"] == "read_only"
@@ -35,7 +39,6 @@ async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
             headers={"Idempotency-Key": "api-project-maintenance-1"},
             json={
                 "repository": "example/project",
-                "user_id": "shaun",
                 "max_items": 20,
             },
         )
@@ -51,7 +54,6 @@ async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
             headers={"Idempotency-Key": "api-project-maintenance-1"},
             json={
                 "repository": "example/project",
-                "user_id": "shaun",
                 "max_items": 20,
             },
         )
@@ -99,13 +101,17 @@ async def test_api_runs_task_and_accepts_approval(container: Container) -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_cancels_a_queued_task(container: Container) -> None:
+async def test_api_cancels_a_queued_task(
+    container: Container,
+    authenticate_client,
+) -> None:
     app = create_app(container)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, container, account_id="shaun")
         submitted = await client.post(
             "/api/v1/tasks/project-maintenance",
             headers={"Idempotency-Key": "api-cancel-task"},
@@ -117,7 +123,6 @@ async def test_api_cancels_a_queued_task(container: Container) -> None:
             f"/api/v1/tasks/{task_id}/cancel",
             json={
                 "reason": "API 用户取消",
-                "requested_by": "shaun",
             },
         )
 
@@ -129,4 +134,5 @@ async def test_api_cancels_a_queued_task(container: Container) -> None:
         assert payload["task_events"][0]["actor"] == "shaun"
 
         health = await client.get("/health")
-        assert health.json()["queue"]["cancelled"] == 1
+        assert "queue" not in health.json()
+        assert container.store.queue_summary()["cancelled"] == 1

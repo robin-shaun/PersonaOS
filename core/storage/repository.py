@@ -154,7 +154,7 @@ class ExecutionStore:
         verified_at: datetime,
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             self._ensure_user(session, user_id)
             connection = session.scalar(
                 select(GitHubConnectionRecord).where(
@@ -202,7 +202,7 @@ class ExecutionStore:
         user_id: str,
         require_active: bool = True,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             connection = session.get(GitHubConnectionRecord, connection_id)
             if connection is None or connection.user_id != user_id:
                 raise KeyError(
@@ -220,7 +220,7 @@ class ExecutionStore:
         user_id: str,
         include_disconnected: bool = False,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             statement = select(GitHubConnectionRecord).where(
                 GitHubConnectionRecord.user_id == user_id
             )
@@ -243,7 +243,7 @@ class ExecutionStore:
         user_id: str,
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             connection = session.get(GitHubConnectionRecord, connection_id)
             if connection is None or connection.user_id != user_id:
                 raise KeyError(
@@ -264,7 +264,7 @@ class ExecutionStore:
         task_input: dict[str, Any],
     ) -> str:
         task_id = _new_id()
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             self._ensure_user(session, user_id)
             if session.get(EmployeeRecord, employee_id) is None:
                 raise KeyError(f"Unknown employee: {employee_id}")
@@ -308,7 +308,7 @@ class ExecutionStore:
         task_id = _new_id()
         queue_job_id = _new_id()
         try:
-            with self.database.session() as session:
+            with self.database.session(owner_id=user_id) as session:
                 existing = self._queue_job_for_key(
                     session,
                     user_id=user_id,
@@ -369,7 +369,7 @@ class ExecutionStore:
         except IntegrityError:
             if normalized_key is None:
                 raise
-            with self.database.session() as session:
+            with self.database.session(owner_id=user_id) as session:
                 existing = self._queue_job_for_key(
                     session,
                     user_id=user_id,
@@ -396,7 +396,7 @@ class ExecutionStore:
         }
 
     def get_task_for_execution(self, task_id: str) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             task = self._required(session, TaskRecord, task_id)
             return _record_dict(task)
 
@@ -406,12 +406,18 @@ class ExecutionStore:
         *,
         requested_by: str,
         reason: str,
+        expected_user_id: str | None = None,
     ) -> dict[str, Any]:
         now = utc_now()
         normalized_actor = requested_by.strip() or "api"
         normalized_reason = reason.strip() or "cancelled by user"
-        with self.database.session() as session:
+        with self.database.session(
+            owner_id=expected_user_id,
+            system=expected_user_id is None,
+        ) as session:
             task = self._required(session, TaskRecord, task_id)
+            if expected_user_id is not None and task.user_id != expected_user_id:
+                raise KeyError(f"TaskRecord not found: {task_id}")
             job = session.scalar(
                 select(QueueJobRecord).where(QueueJobRecord.task_id == task_id)
             )
@@ -552,7 +558,7 @@ class ExecutionStore:
             )
 
     def is_task_cancellation_requested(self, task_id: str) -> bool:
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             status = session.scalar(
                 select(TaskRecord.status).where(TaskRecord.id == task_id)
             )
@@ -568,7 +574,7 @@ class ExecutionStore:
         reason: str | None = None,
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             job = self._required(session, QueueJobRecord, queue_job_id)
             if job.status == "cancelled":
                 return _record_dict(job)
@@ -605,7 +611,7 @@ class ExecutionStore:
         now = utc_now()
         timeout_seconds = max(0.0, timeout_seconds)
         reason = f"task execution exceeded {timeout_seconds:g} seconds"
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             job = self._required(session, QueueJobRecord, queue_job_id)
             if job.status != "leased" or job.lease_owner != worker_id:
                 raise ValueError(
@@ -676,7 +682,7 @@ class ExecutionStore:
         for _ in range(8):
             now = utc_now()
             lease_expires_at = now + timedelta(seconds=lease_seconds)
-            with self.database.session() as session:
+            with self.database.session(system=True) as session:
                 statement = (
                     select(QueueJobRecord)
                     .where(
@@ -813,7 +819,7 @@ class ExecutionStore:
         lease_seconds: int,
     ) -> bool:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             result = session.execute(
                 update(QueueJobRecord)
                 .where(
@@ -835,7 +841,7 @@ class ExecutionStore:
         worker_id: str,
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             job = self._required(session, QueueJobRecord, queue_job_id)
             if job.status == "completed":
                 return _record_dict(job)
@@ -875,7 +881,7 @@ class ExecutionStore:
         retry_delay_seconds: float,
     ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             job = self._required(session, QueueJobRecord, queue_job_id)
             if job.status != "leased" or job.lease_owner != worker_id:
                 raise ValueError(
@@ -913,10 +919,20 @@ class ExecutionStore:
             session.flush()
             return _record_dict(job)
 
-    def retry_failed_queue_job(self, task_id: str) -> dict[str, Any]:
+    def retry_failed_queue_job(
+        self,
+        task_id: str,
+        *,
+        expected_user_id: str | None = None,
+    ) -> dict[str, Any]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(
+            owner_id=expected_user_id,
+            system=expected_user_id is None,
+        ) as session:
             task = self._required(session, TaskRecord, task_id)
+            if expected_user_id is not None and task.user_id != expected_user_id:
+                raise KeyError(f"TaskRecord not found: {task_id}")
             job = session.scalar(
                 select(QueueJobRecord).where(QueueJobRecord.task_id == task_id)
             )
@@ -936,7 +952,7 @@ class ExecutionStore:
             return _record_dict(job)
 
     def mark_task_failed(self, task_id: str, *, error: str) -> None:
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             task = self._required(session, TaskRecord, task_id)
             if task.status not in {
                 "cancelling",
@@ -956,7 +972,7 @@ class ExecutionStore:
             "failed": 0,
             "cancelled": 0,
         }
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             rows = session.execute(
                 select(QueueJobRecord.status, func.count(QueueJobRecord.id)).group_by(
                     QueueJobRecord.status
@@ -1190,7 +1206,7 @@ class ExecutionStore:
         plan: list[dict[str, Any]],
     ) -> str:
         run_id = _new_id()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             task = self._required(session, TaskRecord, task_id)
             if task.status not in {"pending", "failed"}:
                 raise ValueError(
@@ -1216,7 +1232,7 @@ class ExecutionStore:
         initial_state: dict[str, Any],
     ) -> str:
         workflow_run_id = _new_id()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             session.add(
                 WorkflowRunRecord(
                     id=workflow_run_id,
@@ -1239,7 +1255,7 @@ class ExecutionStore:
         state: dict[str, Any],
         history: list[dict[str, Any]],
     ) -> None:
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             workflow_run = self._required(
                 session, WorkflowRunRecord, workflow_run_id
             )
@@ -1261,7 +1277,7 @@ class ExecutionStore:
         latency_ms: int,
     ) -> str:
         record_id = _new_id()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             session.add(
                 ToolCallRecord(
                     id=record_id,
@@ -1286,7 +1302,7 @@ class ExecutionStore:
         version: int = 1,
     ) -> str:
         artifact_id = _new_id()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             session.add(
                 ArtifactRecord(
                     id=artifact_id,
@@ -1308,7 +1324,7 @@ class ExecutionStore:
         proposed_output: dict[str, Any],
     ) -> str:
         approval_id = _new_id()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             session.add(
                 ApprovalRecord(
                     id=approval_id,
@@ -1328,7 +1344,7 @@ class ExecutionStore:
         task_run_id: str,
         output: dict[str, Any],
     ) -> bool:
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             task = self._required(session, TaskRecord, task_id)
             run = self._required(session, TaskRunRecord, task_run_id)
             if task.status == "cancelling":
@@ -1347,7 +1363,7 @@ class ExecutionStore:
         output: dict[str, Any],
     ) -> bool:
         finished_at = utc_now()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             task = self._required(session, TaskRecord, task_id)
             run = self._required(session, TaskRunRecord, task_run_id)
             workflow_run = self._required(
@@ -1376,7 +1392,7 @@ class ExecutionStore:
         error: str,
     ) -> bool:
         finished_at = utc_now()
-        with self.database.session() as session:
+        with self.database.session(system=True) as session:
             task = self._required(session, TaskRecord, task_id)
             run = self._required(session, TaskRunRecord, task_run_id)
             workflow_run = self._required(
@@ -1400,6 +1416,7 @@ class ExecutionStore:
         decision: str,
         edited_output: dict[str, Any] | None,
         reason: str | None,
+        expected_user_id: str | None = None,
     ) -> dict[str, Any]:
         if decision not in {"approved", "approved_with_edits", "rejected"}:
             raise ValueError(f"Unsupported approval decision: {decision}")
@@ -1407,11 +1424,16 @@ class ExecutionStore:
             raise ValueError("edited_output is required for approved_with_edits")
 
         decided_at = utc_now()
-        with self.database.session() as session:
+        with self.database.session(
+            owner_id=expected_user_id,
+            system=expected_user_id is None,
+        ) as session:
             approval = self._required(session, ApprovalRecord, approval_id)
             if approval.status != "pending":
                 raise ValueError(f"Approval {approval_id} has already been decided")
             task = self._required(session, TaskRecord, approval.task_id)
+            if expected_user_id is not None and task.user_id != expected_user_id:
+                raise KeyError(f"ApprovalRecord not found: {approval_id}")
             run = self._required(session, TaskRunRecord, approval.task_run_id)
             workflow_run = session.scalar(
                 select(WorkflowRunRecord).where(
@@ -1507,10 +1529,16 @@ class ExecutionStore:
         *,
         comment: str,
         rating: int | None,
+        expected_user_id: str | None = None,
     ) -> str:
         feedback_id = _new_id()
-        with self.database.session() as session:
-            self._required(session, TaskRecord, task_id)
+        with self.database.session(
+            owner_id=expected_user_id,
+            system=expected_user_id is None,
+        ) as session:
+            task = self._required(session, TaskRecord, task_id)
+            if expected_user_id is not None and task.user_id != expected_user_id:
+                raise KeyError(f"TaskRecord not found: {task_id}")
             session.add(
                 FeedbackRecord(
                     id=feedback_id,
@@ -1526,7 +1554,7 @@ class ExecutionStore:
         return feedback_id
 
     def list_task_ids_for_user(self, user_id: str) -> list[str]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             return list(
                 session.scalars(
                     select(TaskRecord.id)
@@ -1546,7 +1574,7 @@ class ExecutionStore:
         content: dict[str, Any],
         captured_at: datetime,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             self._required(session, UserRecord, user_id)
             if task_id is not None:
                 task = self._required(session, TaskRecord, task_id)
@@ -1593,7 +1621,7 @@ class ExecutionStore:
         if not 0.0 <= weight <= 1.0:
             raise ValueError("preference evidence weight must be between 0 and 1")
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             source = self._required(
                 session, MemorySourceRecord, memory_source_id
             )
@@ -1677,7 +1705,7 @@ class ExecutionStore:
         source_type: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             statement = select(MemorySourceRecord).where(
                 MemorySourceRecord.user_id == user_id
             )
@@ -1702,7 +1730,7 @@ class ExecutionStore:
         allowed_statuses = {"candidate", "confirmed", "rejected", "revoked"}
         if status is not None and status not in allowed_statuses:
             raise ValueError(f"Unsupported preference status: {status}")
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             statement = select(PreferenceRecord).where(
                 PreferenceRecord.user_id == user_id
             )
@@ -1727,7 +1755,7 @@ class ExecutionStore:
         context: str,
     ) -> list[dict[str, Any]]:
         now = utc_now()
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             records = session.scalars(
                 select(PreferenceRecord)
                 .where(
@@ -1753,7 +1781,7 @@ class ExecutionStore:
         *,
         user_id: str,
     ) -> dict[str, Any]:
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             preference = self._required(
                 session, PreferenceRecord, preference_id
             )
@@ -1795,7 +1823,7 @@ class ExecutionStore:
             "revoke": {"confirmed"},
         }
         target = targets[action]
-        with self.database.session() as session:
+        with self.database.session(owner_id=user_id) as session:
             preference = self._required(
                 session, PreferenceRecord, preference_id
             )
@@ -1829,9 +1857,19 @@ class ExecutionStore:
             session.flush()
             return self._preference_bundle(session, preference)
 
-    def get_task_bundle(self, task_id: str) -> dict[str, Any]:
-        with self.database.session() as session:
+    def get_task_bundle(
+        self,
+        task_id: str,
+        *,
+        expected_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self.database.session(
+            owner_id=expected_user_id,
+            system=expected_user_id is None,
+        ) as session:
             task = self._required(session, TaskRecord, task_id)
+            if expected_user_id is not None and task.user_id != expected_user_id:
+                raise KeyError(f"TaskRecord not found: {task_id}")
             runs = list(
                 session.scalars(
                     select(TaskRunRecord)
@@ -1961,10 +1999,16 @@ class ExecutionStore:
                 ],
             }
 
-    def list_tasks(self, *, limit: int = 50) -> list[dict[str, Any]]:
-        with self.database.session() as session:
+    def list_tasks(
+        self,
+        *,
+        user_id: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with self.database.session(owner_id=user_id) as session:
             tasks = session.scalars(
                 select(TaskRecord)
+                .where(TaskRecord.user_id == user_id)
                 .order_by(TaskRecord.created_at.desc())
                 .limit(max(1, min(limit, 200)))
             )

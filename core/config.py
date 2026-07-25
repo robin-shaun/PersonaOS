@@ -34,12 +34,35 @@ class Settings:
     worker_control_poll_seconds: float = 0.25
     database_auto_create_schema: bool = True
     persona_local_owner_id: str = "local-user"
+    persona_auth_key_path: Path | None = field(default=None, repr=False)
+    persona_cookie_secure: bool = False
+    persona_session_idle_seconds: int = 30 * 60
+    persona_session_absolute_seconds: int = 12 * 60 * 60
+    persona_reauthentication_seconds: int = 5 * 60
+    persona_max_sessions_per_account: int = 5
+    persona_login_failure_limit: int = 5
+    persona_login_lockout_seconds: int = 60
     persona_blob_dir: Path | None = None
     persona_blob_key: str | None = field(default=None, repr=False)
     persona_blob_key_path: Path | None = field(default=None, repr=False)
     persona_max_upload_bytes: int = 5 * 1024 * 1024
     persona_max_export_bytes: int = 25 * 1024 * 1024
     persona_embedding_dimensions: int = 384
+
+    def __post_init__(self) -> None:
+        if self.persona_session_idle_seconds > self.persona_session_absolute_seconds:
+            raise ValueError(
+                "PERSONA_SESSION_IDLE_SECONDS must not exceed "
+                "PERSONA_SESSION_ABSOLUTE_SECONDS"
+            )
+        if (
+            self.persona_reauthentication_seconds
+            > self.persona_session_absolute_seconds
+        ):
+            raise ValueError(
+                "PERSONA_REAUTHENTICATION_SECONDS must not exceed "
+                "PERSONA_SESSION_ABSOLUTE_SECONDS"
+            )
 
     @classmethod
     def from_env(cls, base_dir: Path | None = None) -> Settings:
@@ -149,6 +172,50 @@ class Settings:
                 default=True,
             ),
             persona_local_owner_id=persona_owner_id,
+            persona_auth_key_path=_configured_path(
+                project_root,
+                os.getenv("PERSONA_AUTH_KEY_PATH"),
+            ),
+            persona_cookie_secure=_env_bool(
+                "PERSONA_COOKIE_SECURE",
+                default=False,
+            ),
+            persona_session_idle_seconds=_env_int(
+                "PERSONA_SESSION_IDLE_SECONDS",
+                default=30 * 60,
+                minimum=60,
+                maximum=7 * 24 * 60 * 60,
+            ),
+            persona_session_absolute_seconds=_env_int(
+                "PERSONA_SESSION_ABSOLUTE_SECONDS",
+                default=12 * 60 * 60,
+                minimum=5 * 60,
+                maximum=30 * 24 * 60 * 60,
+            ),
+            persona_reauthentication_seconds=_env_int(
+                "PERSONA_REAUTHENTICATION_SECONDS",
+                default=5 * 60,
+                minimum=30,
+                maximum=60 * 60,
+            ),
+            persona_max_sessions_per_account=_env_int(
+                "PERSONA_MAX_SESSIONS_PER_ACCOUNT",
+                default=5,
+                minimum=1,
+                maximum=100,
+            ),
+            persona_login_failure_limit=_env_int(
+                "PERSONA_LOGIN_FAILURE_LIMIT",
+                default=5,
+                minimum=2,
+                maximum=100,
+            ),
+            persona_login_lockout_seconds=_env_int(
+                "PERSONA_LOGIN_LOCKOUT_SECONDS",
+                default=60,
+                minimum=1,
+                maximum=24 * 60 * 60,
+            ),
             persona_blob_dir=_configured_path(
                 project_root,
                 os.getenv("PERSONA_BLOB_DIR"),

@@ -19,8 +19,11 @@ from core.retrieval.embeddings import FeatureHashEmbeddingProvider
 from core.retrieval.repository import PersonaRetrievalRepository
 from core.retrieval.service import HybridRetrievalService, MemoryIndexService
 from core.security.access import AccessContext
+from core.security.auth_key import LocalAuthKey
+from core.security.authentication import AuthenticationService
 from core.services.github_connections import GitHubConnectionService
 from core.services.knowledge_ingestion import KnowledgeIngestionService
+from core.services.legacy_owner_migration import LegacyOwnerMigrationService
 from core.services.memory_reindex import MemoryReindexService
 from core.services.persona_qa import PersonaQuestionAnsweringService
 from core.services.personalization import PersonalizationService
@@ -31,6 +34,7 @@ from core.services.project_maintenance import (
 )
 from core.skills.executor import SkillExecutor
 from core.skills.registry import SkillRegistry
+from core.storage.auth_repository import AuthRepository
 from core.storage.blob import EncryptedLocalBlobStore, decode_blob_key
 from core.storage.database import Database
 from core.storage.persona_lifecycle_repository import (
@@ -52,6 +56,8 @@ class Container:
     runtime: AgentRuntime
     github_connections: GitHubConnectionService
     personalization: PersonalizationService
+    authentication: AuthenticationService
+    legacy_owner_migration: LegacyOwnerMigrationService
     persona_access: AccessContext
     personas: PersonaService
     memory_index: MemoryIndexService
@@ -132,6 +138,20 @@ def build_container(
         provider=github_app,
     )
     personalization = PersonalizationService(store)
+    authentication = AuthenticationService(
+        repository=AuthRepository(database),
+        auth_key=LocalAuthKey(
+            settings.persona_auth_key_path
+            or settings.base_dir / "var" / "persona_auth.key"
+        ),
+        idle_seconds=settings.persona_session_idle_seconds,
+        absolute_seconds=settings.persona_session_absolute_seconds,
+        reauthentication_seconds=settings.persona_reauthentication_seconds,
+        max_sessions=settings.persona_max_sessions_per_account,
+        failure_limit=settings.persona_login_failure_limit,
+        lockout_seconds=settings.persona_login_lockout_seconds,
+    )
+    legacy_owner_migration = LegacyOwnerMigrationService(database)
     persona_repository = PersonaRepository(database)
     persona_lifecycle_repository = PersonaLifecycleRepository(database)
     retrieval_repository = PersonaRetrievalRepository(database)
@@ -216,6 +236,8 @@ def build_container(
         runtime=runtime,
         github_connections=github_connections,
         personalization=personalization,
+        authentication=authentication,
+        legacy_owner_migration=legacy_owner_migration,
         persona_access=persona_access,
         personas=personas,
         memory_index=memory_index,

@@ -6,20 +6,27 @@ import {
   type FormEvent,
 } from "react";
 
-import { api } from "./api";
+import { AuthenticationGate, ReauthenticationDialog } from "./AuthViews";
+import { api, ApiError } from "./api";
 import {
   DEMO_PERSONA_DESCRIPTION,
   DEMO_PERSONA_NAME,
   demoFile,
 } from "./demo";
 import { AuditPage } from "./pages/AuditPage";
+import { AccountPage } from "./pages/AccountPage";
 import { ChatPage } from "./pages/ChatPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { MemoriesPage } from "./pages/MemoriesPage";
 import { ReviewPage } from "./pages/ReviewPage";
 import { TasksPage } from "./pages/TasksPage";
-import type { Health, Persona } from "./types";
+import type {
+  AuthenticatedSession,
+  AuthenticationStatus,
+  Health,
+  Persona,
+} from "./types";
 import {
   EmptyState,
   ErrorState,
@@ -39,7 +46,8 @@ type Page =
   | "memories"
   | "chat"
   | "tasks"
-  | "audit";
+  | "audit"
+  | "account";
 
 const selectedPersonaKey = "personaos.selected-persona";
 
@@ -56,6 +64,7 @@ const navigation: Array<{
   { id: "chat", label: "问答", caption: "引用与不确定性", icon: "chat" },
   { id: "tasks", label: "任务", caption: "执行轨迹", icon: "task" },
   { id: "audit", label: "审计", caption: "事件与导出", icon: "audit" },
+  { id: "account", label: "账户", caption: "身份与会话", icon: "shield" },
 ];
 
 function CreatePersona({
@@ -186,6 +195,10 @@ function Welcome({
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [authenticationStatus, setAuthenticationStatus] =
+    useState<AuthenticationStatus | null>(null);
+  const [authenticatedSession, setAuthenticatedSession] =
+    useState<AuthenticatedSession | null>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [selectedPersonaId, setSelectedPersonaId] = useState(
     () => localStorage.getItem(selectedPersonaKey) ?? "",
@@ -196,6 +209,9 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [launchingDemo, setLaunchingDemo] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [reauthenticationOpen, setReauthenticationOpen] = useState(false);
   const [taskFocusId, setTaskFocusId] = useState("");
   const [notice, setNotice] = useState<{
     message: string;
@@ -219,11 +235,30 @@ export default function App() {
     setLoading(true);
     setLoadError("");
     try {
-      const [healthResult, personaResult] = await Promise.all([
+      const [healthResult, statusResult] = await Promise.all([
         api.health(),
-        api.listPersonas(),
+        api.authenticationStatus(),
       ]);
       setHealth(healthResult);
+      setAuthenticationStatus(statusResult);
+      if (statusResult.setup_required) {
+        setAuthenticatedSession(null);
+        setPersonas([]);
+        return;
+      }
+      let sessionResult: AuthenticatedSession;
+      try {
+        sessionResult = await api.getSession();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          setAuthenticatedSession(null);
+          setPersonas([]);
+          return;
+        }
+        throw error;
+      }
+      const personaResult = await api.listPersonas();
+      setAuthenticatedSession(sessionResult);
       setPersonas(personaResult);
       setSelectedPersonaId((current) => {
         const selectedStillExists = personaResult.some(
@@ -247,6 +282,38 @@ export default function App() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!authenticatedSession) return undefined;
+    const authenticationRequired = () => {
+      setAuthenticatedSession(null);
+      setPersonas([]);
+      setPage("overview");
+      setReauthenticationOpen(false);
+      notify("会话已失效，请重新登录。", "warning");
+    };
+    const reauthenticationRequired = () => {
+      setReauthenticationOpen(true);
+    };
+    window.addEventListener(
+      "personaos:authentication-required",
+      authenticationRequired,
+    );
+    window.addEventListener(
+      "personaos:reauthentication-required",
+      reauthenticationRequired,
+    );
+    return () => {
+      window.removeEventListener(
+        "personaos:authentication-required",
+        authenticationRequired,
+      );
+      window.removeEventListener(
+        "personaos:reauthentication-required",
+        reauthenticationRequired,
+      );
+    };
+  }, [authenticatedSession, notify]);
 
   const selectedPersona = useMemo(
     () =>
@@ -327,6 +394,54 @@ export default function App() {
     setPage("tasks");
   };
 
+  const login = async (username: string, password: string) => {
+    setLoginBusy(true);
+    setLoginError("");
+    try {
+      const sessionResult = await api.login(username, password);
+      const personaResult = await api.listPersonas();
+      setAuthenticatedSession(sessionResult);
+      setPersonas(personaResult);
+      setSelectedPersonaId((current) => {
+        const selectedStillExists = personaResult.some(
+          (persona) => persona.id === current,
+        );
+        const next = selectedStillExists
+          ? current
+          : (personaResult[0]?.id ?? "");
+        if (next) localStorage.setItem(selectedPersonaKey, next);
+        return next;
+      });
+      notify(`已作为 ${sessionResult.account.display_name} 登录。`, "success");
+    } catch (error) {
+      setLoginError(
+        error instanceof ApiError && error.status === 401
+          ? "用户名或密码不正确。"
+          : error instanceof Error
+            ? error.message
+            : "登录失败",
+      );
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "服务端退出失败",
+        "warning",
+      );
+    } finally {
+      setAuthenticatedSession(null);
+      setPersonas([]);
+      setPage("overview");
+      setReauthenticationOpen(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="boot-screen">
@@ -345,6 +460,17 @@ export default function App() {
           请确认 API 已在本机启动，或通过 Docker Compose 打开 Web 服务。
         </p>
       </div>
+    );
+  }
+
+  if (!authenticatedSession) {
+    return (
+      <AuthenticationGate
+        busy={loginBusy}
+        error={loginError}
+        onLogin={(username, password) => void login(username, password)}
+        setupRequired={authenticationStatus?.setup_required ?? false}
+      />
     );
   }
 
@@ -390,7 +516,7 @@ export default function App() {
             <button
               aria-current={page === item.id ? "page" : undefined}
               className={page === item.id ? "is-active" : ""}
-              disabled={!selectedPersona}
+              disabled={item.id !== "account" && !selectedPersona}
               key={item.id}
               onClick={() => setPage(item.id)}
               type="button"
@@ -421,7 +547,16 @@ export default function App() {
       </aside>
 
       <section className="workspace">
-        {personas.length === 0 ? (
+        {page === "account" ? (
+          <main className="page">
+            <AccountPage
+              notify={notify}
+              onLogout={() => void logout()}
+              onReauthenticate={() => setReauthenticationOpen(true)}
+              session={authenticatedSession}
+            />
+          </main>
+        ) : personas.length === 0 ? (
           <Welcome
             creating={creating}
             launchingDemo={launchingDemo}
@@ -534,6 +669,16 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      <ReauthenticationDialog
+        onClose={() => setReauthenticationOpen(false)}
+        onSuccess={(session) => {
+          setAuthenticatedSession(session);
+          setReauthenticationOpen(false);
+          notify("身份已重新验证；请重试刚才的操作。", "success");
+        }}
+        open={reauthenticationOpen}
+      />
     </div>
   );
 }

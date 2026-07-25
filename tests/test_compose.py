@@ -19,9 +19,9 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
         "sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0"
     )
     assert services["api"]["ports"] == ["127.0.0.1:18110:18110"]
-    assert services["api"]["image"] == "personaos:0.11.0"
+    assert services["api"]["image"] == "personaos:0.12.0"
     assert services["worker"]["image"] == services["api"]["image"]
-    assert services["web"]["image"] == "personaos-web:0.11.0"
+    assert services["web"]["image"] == "personaos-web:0.12.0"
     assert services["web"]["ports"] == ["127.0.0.1:18111:8080"]
     assert services["web"]["build"]["dockerfile"] == "apps/web/Dockerfile"
     assert "alembic upgrade head" in services["api"]["command"][-1]
@@ -38,3 +38,7 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     assert "volumes" not in services["web"]
     assert services["api"]["environment"]["PERSONA_EMBEDDING_DIMENSIONS"] == "384"
     assert services["api"]["environment"]["PERSONA_MAX_EXPORT_BYTES"] == "26214400"
+    assert services["api"]["environment"]["PERSONA_AUTH_KEY_PATH"] == (
+        "/app/var/persona/auth.key"
+    )
+    assert services["api"]["environment"]["PERSONA_COOKIE_SECURE"] == "false"

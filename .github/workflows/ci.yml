@@ -115,8 +115,26 @@ jobs:
       - name: Start clean stack
         run: docker compose up --detach --wait --wait-timeout 180
 
+      - name: Bootstrap isolated smoke accounts
+        env:
+          PERSONAOS_SMOKE_ADMIN_PASSWORD: compose-smoke-admin-password-123
+          PERSONAOS_SMOKE_MEMBER_PASSWORD: compose-smoke-member-password-123
+        run: |
+          printf '%s\n' "${PERSONAOS_SMOKE_ADMIN_PASSWORD}" | docker compose exec -T api python -m apps.admin create-account --username smoke-admin --display-name "Smoke Admin" --role admin --password-stdin
+          printf '%s\n' "${PERSONAOS_SMOKE_MEMBER_PASSWORD}" | docker compose exec -T api python -m apps.admin create-account --username smoke-member --display-name "Smoke Member" --role member --password-stdin
+
       - name: Exercise the evidence loop through Web origin
+        env:
+          PERSONAOS_SMOKE_ADMIN_PASSWORD: compose-smoke-admin-password-123
+          PERSONAOS_SMOKE_MEMBER_PASSWORD: compose-smoke-member-password-123
         run: python3 examples/compose_smoke.py
+
+      - name: Verify PostgreSQL owner row security
+        run: >-
+          docker compose exec -T api
+          python examples/postgres_rls_smoke.py
+          --owner-a smoke-admin
+          --owner-b smoke-member
 
       - name: Capture service logs on failure
         if: failure()

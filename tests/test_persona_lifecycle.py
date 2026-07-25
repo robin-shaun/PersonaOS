@@ -119,6 +119,7 @@ class ExternalRecordingEmbeddings:
 @pytest.mark.asyncio
 async def test_versioned_memory_policy_relations_and_export(
     lifecycle_container: Container,
+    authenticate_client,
 ) -> None:
     first_source = "公开线索 Alpha：我习惯先给结论，再列出证据。"
     second_source = "私密线索 Beta：我每周五整理项目日志。"
@@ -128,6 +129,7 @@ async def test_versioned_memory_policy_relations_and_export(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, lifecycle_container)
         persona_id = (
             await client.post(
                 "/api/v1/personas",
@@ -386,6 +388,7 @@ async def test_versioned_memory_policy_relations_and_export(
 @pytest.mark.asyncio
 async def test_document_deletion_removes_blob_graph_search_and_derived_answer(
     lifecycle_container: Container,
+    authenticate_client,
 ) -> None:
     source = "删除证明 Gamma：我负责设计可追溯的记忆删除流程。"
     app = create_app(lifecycle_container)
@@ -394,6 +397,7 @@ async def test_document_deletion_removes_blob_graph_search_and_derived_answer(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, lifecycle_container)
         persona_id = (
             await client.post(
                 "/api/v1/personas",
@@ -526,6 +530,7 @@ async def test_document_deletion_removes_blob_graph_search_and_derived_answer(
 @pytest.mark.asyncio
 async def test_cancelled_processing_document_can_be_deleted(
     lifecycle_container: Container,
+    authenticate_client,
 ) -> None:
     source = "取消中的资料 Epsilon：删除不能永久卡在 processing 状态。"
     app = create_app(lifecycle_container)
@@ -534,6 +539,7 @@ async def test_cancelled_processing_document_can_be_deleted(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, lifecycle_container)
         persona_id = (
             await client.post(
                 "/api/v1/personas",
@@ -570,6 +576,7 @@ async def test_cancelled_processing_document_can_be_deleted(
 @pytest.mark.asyncio
 async def test_shared_content_blob_is_deleted_only_after_last_document(
     lifecycle_container: Container,
+    authenticate_client,
 ) -> None:
     shared = "共享 Blob Delta：同一原始资料被两个人物空间授权导入。"
     app = create_app(lifecycle_container)
@@ -578,6 +585,7 @@ async def test_shared_content_blob_is_deleted_only_after_last_document(
         transport=transport,
         base_url="http://test",
     ) as client:
+        await authenticate_client(client, lifecycle_container)
         first_persona = (
             await client.post(
                 "/api/v1/personas",
