@@ -8,3 +8,5 @@ __pycache__/
 *.key
 *.blob
 /var/
+/apps/web/node_modules/
+/apps/web/dist/

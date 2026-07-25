@@ -1,16 +1,17 @@
 # PersonaOS 数字分身 MVP 实施方案
 
-- 状态：已评审的实施基线；M1、M2、M3 已实现
+- 状态：已评审的实施基线；M1、M2、M3、M4 已实现
 - 日期：2026-07-25
 - 仓库基线：`37daaa3` (`main`)
 - 适用范围：第一阶段“数字员工”向第二阶段“证据驱动的数字分身”演进
 
-> 实施进展（2026-07-25）：仓库版本已进入 `0.9.0`。M1 的审核优先资料入口与
+> 实施进展（2026-07-25）：仓库版本已进入 `0.10.0`。M1 的审核优先资料入口与
 > M2 的 embedding 空间、重向量任务、混合检索、对话、结构化回答、citation
 > 校验和无证据边界均已落地。M3 已增加确认后版本编辑、记忆关系、敏感等级与
-> 模型数据边界、可校验导出以及记忆/来源的级联删除。PostgreSQL/pgvector、
-> API、Worker 的 Compose 基线已交付；它不包含 M4 的 React Web UI。第 2–4 节
-> 仍保留审计当时的 `0.6.0` 事实快照，避免用后来实现篡改基线。
+> 模型数据边界、可校验导出以及记忆/来源的级联删除。M4 已交付 React 工作台、
+> 同源非 root Web 容器、免费虚构 Demo 和空环境 smoke；Compose 现在覆盖
+> PostgreSQL/pgvector、API、Worker 与 Web。第 2–4 节仍保留审计当时的 `0.6.0`
+> 事实快照，避免用后来实现篡改基线。
 
 ## 1. 结论
 
@@ -581,7 +582,7 @@ CI、依赖锁定和发布说明。README 在五分钟内演示完整闭环，�
 每个里程碑独立可运行、可测试、可演示。不得为了后续里程碑提前创建没有行为的
 空目录或大量 TODO。
 
-## 15. M1、M2、M3 实施结果与唯一下一里程碑
+## 15. M1、M2、M3、M4 实施结果与唯一下一里程碑
 
 M1 已按以下边界落地：
 
@@ -625,11 +626,28 @@ M3 继续完成隐私生命周期：
    key，并生成 SHA-256 manifest 和导出审计；
 8. 删除审计只保留资源 ID、内容哈希和级联计数，重复请求返回同一墓碑回执。
 
+M4 把上述能力形成可操作产品入口：
+
+1. React/TypeScript 工作台覆盖人物总览、资料上传/状态/分块、候选逐条审核、
+   记忆版本/敏感等级/关系、问答 citation、任务轨迹和审计/导出；
+2. UI 明示模拟边界、真实性类别和证据定位；没有证据的回答展示未调用模型原因，
+   删除来源/记忆使用独立高风险确认对话框；
+3. 浏览器只调用同源 API，不持有模型、数据库或 Blob 密钥；owner、版本冲突、
+   模型边界、删除依赖图和审计仍由后端强制执行；
+4. Vite 生成静态资产，非 root Nginx 提供 `/healthz` 并代理 `/health` 与
+   `/api/*`；CSP 禁止跨源脚本/连接、嵌入和无关设备权限；
+5. Compose 增加只绑定 `127.0.0.1:18111` 的 Web 服务，继续保留
+   `127.0.0.1:18110` API 兼容入口；
+6. 页面可显式载入无需 API Key 的虚构 Demo，但不会自动确认候选；独立 smoke
+   经 Web origin 验证人物、导入、Worker、测试确认、引用和审计；
+7. 前端精确版本写入 npm lockfile，组件测试覆盖人物创建、人工审核门禁和可解析
+   citation，生产构建同时执行严格 TypeScript 检查。
+
 当前离线 embedding 是可复现的 Unicode 特征哈希，不是高质量语义模型；回答
 生成器只复述证据，不做开放式模型归纳。`source_verified` 仍只表示内容能逐字
 定位回资料，并不证明资料陈述是客观事实。
 
-本轮验证结果为：`56 passed`；变更文件 Ruff 静态检查通过；SQLite migration
+M3 验证结果为：`56 passed`；变更文件 Ruff 静态检查通过；SQLite migration
 完成 upgrade/check/downgrade。端到端测试证明外部生成与外部 embedding 只能
 接收 public 记忆；来源删除后 Blob、chunk、memory/version/evidence、全部
 embedding、citation、词法和向量检索结果均已移除，派生回答已擦除，审计中没有
@@ -637,8 +655,16 @@ embedding、citation、词法和向量检索结果均已移除，派生回答已
 执行环境没有 Docker，因此 Compose 只完成配置与安全约束测试；真实
 PostgreSQL/pgvector 容器查询尚未在本机执行。
 
-唯一下一里程碑是 **M4：Web UI 与一键本地演示**。交付人物、资料导入、候选
-审核、记忆版本/关系、问答引用、删除确认和审计页面，并接入现有 Compose。
+M4 的本机验收结果为：`npm ci` 审计 0 个已知漏洞，Vitest `3 passed`，严格
+TypeScript 检查与 Vite 生产构建通过；Python `59 passed`，Ruff 全量检查通过。
+经 Vite 同源入口连接真实 SQLite API/Worker 的 smoke 已完成，回答返回 `C1` 并
+解析到本次上传文件的行号定位，审计包含人物创建、资料上传/处理、记忆确认、
+索引和问题回答。执行环境没有 Docker/Podman，因此真实 PostgreSQL/pgvector、
+Nginx 容器和 `docker compose config` 未执行；Compose 只通过 YAML、安全约束与
+交付资产自动化测试，不能把这些结果当作真实容器验收。
+
+唯一下一里程碑是 **M5：开源发布门槛**。补齐许可证、贡献与 Skill 开发指南、
+安全策略、稳定 API 文档、架构图、路线图、CI、发布说明和五分钟上手叙事。
 
 ## 16. 调研依据
 
@@ -671,3 +697,10 @@ PostgreSQL/pgvector 容器查询尚未在本机执行。
   版本切换和关系/索引级联清理使用显式事务保证一致性；
 - [NIST SP 800-88 Rev. 2](https://csrc.nist.gov/pubs/sp/800/88/r2/final)：
   区分应用层删除回执与存储介质净化，避免把数据库/Blob 删除夸大为物理擦除。
+- [React Build from Scratch](https://react.dev/learn/build-a-react-app-from-scratch)：
+  React/TypeScript 客户端使用 Vite 构建的官方路径与非框架方案取舍。
+- [Vite Getting Started](https://vite.dev/guide/) 与
+  [Vitest Getting Started](https://vitest.dev/guide/)：静态生产构建、Node
+  兼容要求及共享 Vite 配置的组件测试。
+- [NGINX proxy module](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)：
+  Web 容器同源代理路径、header 和 timeout 语义。

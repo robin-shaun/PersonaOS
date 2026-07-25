@@ -3,9 +3,9 @@
 一个本地优先、证据驱动、人工审核优先的开源数字员工与数字分身系统。
 
 PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选、人工确认版本和
-原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.9.0` 已
-跑通 M3：“创建人物 → 导入文本 → 人工确认 → 混合检索与引用问答 → 版本化
-修改、关系、导出或可证明删除”。专用 Web 管理端仍在后续里程碑。
+原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.10.0` 已
+跑通 M4：“创建人物 → 导入文本 → 人工确认 → 混合检索与引用问答 → 版本化
+修改、关系、导出或可证明删除”，并用专用 Web 工作台呈现整个证据链。
 
 仓库也保留原有的 GitHub 项目维护数字员工：它只读取公共或已授权仓库，生成
 项目简报与 Issue 优先级建议，不修改 Issue、评论、PR 或 Release。建议必须
@@ -13,9 +13,10 @@ PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选�
 
 ## 产品形态
 
-产品采用 Web/API 优先：API、Worker 与可选模型网关运行在服务端，密钥不会
-下发到浏览器。当前通过 FastAPI `/docs` 操作；专用 React 管理端尚未实现。
-核心采用模块化单体和可替换适配器，避免把记忆语义锁进某个 Agent 框架。
+产品采用 Web/API 优先：React 工作台只调用同源 API，API、Worker 与可选模型
+网关运行在服务端，密钥不会下发到浏览器。生产静态页面由非 root Nginx 提供，
+`/api/*` 同源转发到 FastAPI；核心仍是模块化单体和可替换适配器，避免把记忆
+语义锁进某个前端或 Agent 框架。
 
 ## 已实现的两个产品闭环
 
@@ -55,16 +56,30 @@ Personal Layer 还会把用户对数字员工输出的修改、拒绝和显式�
 
 ## 快速启动
 
-需要 Python 3.11 或更高版本。
+需要 Docker Compose；主机开发模式需要 Python 3.11 或更高版本，修改 Web
+工作台需要 Node.js 22.12 或更高版本。
 
-最完整的本地基线使用 Docker Compose，启动 PostgreSQL/pgvector、API 和 Worker：
+最完整的本地基线使用 Docker Compose，一次启动 PostgreSQL/pgvector、API、
+Worker 和 Web：
 
 ~~~bash
 docker compose up --build
 ~~~
 
-打开 http://127.0.0.1:18110/docs。API 只映射到本机回环地址；Compose 会先执行
-Alembic migration，并让 API 与 Worker 共享加密 Blob 密钥卷。停止服务：
+打开 http://127.0.0.1:18111。首次进入可以创建人物，也可以点击“载入虚构演示
+人物”；后者不需要 API Key，不调用付费模型，且仍要求用户逐条审核候选。FastAPI
+文档保留在 http://127.0.0.1:18110/docs。
+
+Web 与 API 都只映射到本机回环地址；Compose 会先执行 Alembic migration，并让
+API 与 Worker 共享加密 Blob 密钥卷。可从另一个终端执行完整的空环境 smoke：
+
+~~~bash
+python3 examples/compose_smoke.py
+~~~
+
+该脚本经由 Web 同源入口创建一个虚构人物，导入资料，等待 Worker，明确确认一条
+测试记忆，再验证回答引用和审计链。它会保留虚构人物，便于在 UI 中检查结果。
+停止服务：
 
 ~~~bash
 docker compose down
@@ -98,7 +113,20 @@ Alembic 升级和 schema check；无法明确识别的部分迁移人物库会�
 .venv/bin/python -m apps.worker.run
 ~~~
 
-API 与 Worker 就绪后，可以运行不调用模型或付费服务的 M3 演示：
+开发 Web 工作台时，在 API/Worker 已启动的前提下另开终端；Vite 会把 `/health`
+和 `/api` 代理到本机 18110：
+
+~~~bash
+cd apps/web
+npm ci
+npm run dev
+~~~
+
+打开 http://127.0.0.1:5173。生产交付仍使用 Compose 的 18111，不使用 Vite
+开发服务器。
+
+API 与 Worker 就绪后，也可以运行不调用模型或付费服务的命令行隐私生命周期
+演示：
 
 ~~~bash
 .venv/bin/python examples/persona_memory_demo.py
@@ -360,6 +388,7 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
     apps/
       api/                 FastAPI 接口
       worker/              持久化 Worker 与同步调试入口
+      web/                 React/TypeScript 工作台与同源 Nginx 代理
     core/
       agents/              Employee Definition 与 AgentRuntime
       ingestion/           可复现切分和可替换候选提取器
@@ -380,28 +409,30 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
       skills/              Skill 定义与版本
       workflows/           Workflow 定义与版本
     migrations/            Alembic schema 演进
-    examples/              无付费服务的最小人物资料演示
+    examples/              无付费服务的最小人物演示与 Compose smoke
     tests/                 核心闭环和 API 测试
 
 当前数字员工设计与安全边界见 [docs/architecture.md](docs/architecture.md)。
 向证据驱动数字分身演进的仓库审计、架构取舍和分阶段验收标准见
 [docs/persona-mvp-plan.md](docs/persona-mvp-plan.md)。版本、模型边界和删除语义
-记录在 [ADR 0001](docs/adr/0001-memory-privacy-lifecycle.md)。
+记录在 [ADR 0001](docs/adr/0001-memory-privacy-lifecycle.md)，Web 同源部署边界
+记录在 [ADR 0002](docs/adr/0002-local-web-workspace.md)。
 
 ## 测试
 
 ~~~bash
 .venv/bin/pytest -q
 .venv/bin/ruff check apps core examples migrations tests
+(cd apps/web && npm ci && npm test && npm run build)
 DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
   .venv/bin/alembic upgrade head
 DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
   .venv/bin/alembic check
 ~~~
 
-测试使用隔离的内存或临时数据库、伪造的 GitHub 快照和模拟 Hermes HTTP 网关，
-不消耗 GitHub 或模型 API 配额。手动迁移检查命令会创建本地测试数据库；不要
-把它指向包含真实资料的数据库。
+Python 测试使用隔离的内存或临时数据库、伪造的 GitHub 快照和模拟 Hermes HTTP
+网关；Web 组件测试模拟同一套 HTTP 契约。两者都不消耗 GitHub 或模型 API 配额。
+手动迁移检查命令会创建本地测试数据库；不要把它指向包含真实资料的数据库。
 
 ## 当前边界
 
@@ -437,8 +468,10 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
   embedding 空间和内容哈希元数据。大规模流式归档尚未实现。
 - Blob 引用检查和上传/删除在单 API 进程内加锁。多 API 副本需要数据库级对象
   引用租约或独立对象存储协调器后，才可安全并发执行来源删除。
-- Docker Compose 已覆盖数据库、API 和 Worker；专用 Web UI 尚未实现，当前用
-  `/docs` 与演示脚本操作。本环境没有 Docker 时仍可用 SQLite 跑测试和主机演示。
+- Docker Compose 已覆盖数据库、API、Worker 和非 root Web 静态服务；Web 只
+  通过同源代理访问 API，并设置 CSP、禁止嵌入和摄像头/麦克风/定位权限。本环境
+  没有 Docker 时仍可用 SQLite 跑测试和主机演示；真实 Compose 容器仍需在安装
+  Docker 的主机上验证。
 - Skill 定义已声明输入/输出、权限、工具、超时、重试、风险、确认、测试、示例
   和依赖；现有模型 Skill 会执行工具/权限/超时检查。但本版本尚无第三方 Skill
   安装、启停、升级、独立进程/容器隔离或自动回滚，不能运行不可信社区代码。
@@ -452,5 +485,5 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-唯一下一里程碑是 M4：交付 React 管理端，覆盖人物、资料导入、候选审核、记忆
-版本与关系、问答引用、删除确认和审计，并把它接入现有 Compose 的本地演示。
+唯一下一里程碑是 M5：补齐开源发布门槛，包括许可证、贡献与 Skill 开发指南、
+安全策略、稳定 API 文档、CI、发布说明和五分钟项目介绍。

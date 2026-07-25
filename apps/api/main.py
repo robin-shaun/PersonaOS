@@ -48,7 +48,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="PersonaOS",
-        version="0.9.0",
+        version="0.10.0",
         description=(
             "Evidence-driven digital employee and review-first persona memory "
             "with versioned edits, model data boundaries and auditable deletion."

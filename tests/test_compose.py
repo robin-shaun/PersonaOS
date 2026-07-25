@@ -13,17 +13,25 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     )
     services = compose["services"]
 
-    assert set(services) == {"api", "db", "worker"}
+    assert set(services) == {"api", "db", "web", "worker"}
     assert services["db"]["image"] == ("pgvector/pgvector:0.8.5-pg17-bookworm")
     assert services["api"]["ports"] == ["127.0.0.1:18110:18110"]
-    assert services["api"]["image"] == "personaos:0.9.0"
+    assert services["api"]["image"] == "personaos:0.10.0"
     assert services["worker"]["image"] == services["api"]["image"]
+    assert services["web"]["image"] == "personaos-web:0.10.0"
+    assert services["web"]["ports"] == ["127.0.0.1:18111:8080"]
+    assert services["web"]["build"]["dockerfile"] == "apps/web/Dockerfile"
     assert "alembic upgrade head" in services["api"]["command"][-1]
     assert (
         services["api"]["environment"]["DIGITAL_EMPLOYEE_AUTO_CREATE_SCHEMA"] == "false"
     )
     assert services["worker"]["depends_on"]["api"]["condition"] == ("service_healthy")
+    assert services["web"]["depends_on"]["api"]["condition"] == ("service_healthy")
+    assert services["web"]["healthcheck"]["test"][-1] == (
+        "http://127.0.0.1:8080/healthz"
+    )
     assert services["api"]["volumes"] == ["personaos-private:/app/var"]
     assert services["worker"]["volumes"] == ["personaos-private:/app/var"]
+    assert "volumes" not in services["web"]
     assert services["api"]["environment"]["PERSONA_EMBEDDING_DIMENSIONS"] == "384"
     assert services["api"]["environment"]["PERSONA_MAX_EXPORT_BYTES"] == "26214400"

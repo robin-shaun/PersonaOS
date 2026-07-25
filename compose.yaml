@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   api:
-    image: personaos:0.9.0
+    image: personaos:0.10.0
     build:
       context: .
     environment: *app-environment
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: personaos:0.9.0
+    image: personaos:0.10.0
     build:
       context: .
     environment: *app-environment
@@ -72,6 +72,27 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: personaos-web:0.10.0
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:18111:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - http://127.0.0.1:8080/healthz
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
 volumes:
