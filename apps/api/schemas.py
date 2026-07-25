@@ -169,3 +169,28 @@ class PersonaMemoryReviewRequest(BaseModel):
         ):
             raise ValueError("edited_content must not be empty")
         return self
+
+
+class PersonaConversationCreate(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.split())
+        return normalized or None
+
+
+class PersonaQuestionCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=10_000)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("content must not be empty")
+        return normalized

@@ -86,6 +86,7 @@ import fastapi
 import httpx
 import jwt
 import multipart
+import pgvector
 import psycopg
 import pydantic
 import sqlalchemy

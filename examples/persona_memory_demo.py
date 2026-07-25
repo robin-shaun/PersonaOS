@@ -68,6 +68,21 @@ def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
                 },
             )
         )
+        conversation = _required(
+            client.post(
+                f"/api/v1/personas/{persona['id']}/conversations",
+                json={"title": "PersonaOS 最小问答演示"},
+            )
+        )
+        answer = _required(
+            client.post(
+                f"/api/v1/conversations/{conversation['id']}/messages",
+                json={
+                    "content": "我什么时候加入 PersonaOS，负责什么？",
+                    "top_k": 3,
+                },
+            )
+        )
         audits = _required(client.get(f"/api/v1/personas/{persona['id']}/audit-events"))
         first_evidence = confirmed["evidence"][0]
         return {
@@ -92,13 +107,20 @@ def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
                 "locator": first_evidence["evidence"]["locator_snapshot"],
                 "excerpt": first_evidence["evidence"]["excerpt"],
             },
+            "answer": {
+                "content": answer["assistant_message"]["content"],
+                "answer_status": answer["assistant_message"]["answer_status"],
+                "uncertainty": answer["assistant_message"]["uncertainty"],
+                "citations": answer["citations"],
+                "embedding_space_id": answer["retrieval_run"]["embedding_space_id"],
+            },
             "audit_actions": [event["action"] for event in audits],
         }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the review-first PersonaOS M1 evidence demo."
+        description="Run the evidence-bound PersonaOS M2 question-answer demo."
     )
     parser.add_argument(
         "--base-url",

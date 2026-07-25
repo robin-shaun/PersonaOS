@@ -2,15 +2,15 @@
 
 ## 产品边界
 
-PersonaOS `0.7.0` 有两个相互隔离但复用同一运行底座的产品闭环：
+PersonaOS `0.8.0` 有两个相互隔离但复用同一运行底座的产品闭环：
 
 1. 人物资料闭环：创建 Persona，导入授权文本，生成有来源候选，由用户确认或
-   拒绝，并保留不可变版本和审计；
+   拒绝，并仅用确认的当前版本完成混合检索与带引用问答；
 2. 项目维护员工：汇总 GitHub 仓库、开放 Issue 和 PR，给出可追溯建议，记录
    用户审批形成的行为证据。
 
-当前人物闭环不做检索问答，也不声称系统是现实中的本人；项目维护员工不自动
-修改 GitHub。Web UI、登录、多租户、记忆删除和模型驱动总结不属于本版本。
+人物闭环不声称系统是现实中的本人；项目维护员工不自动修改 GitHub。Web UI、
+登录、多租户、记忆删除和模型驱动总结不属于本版本。
 
 ## 人物资料证据链
 
@@ -38,13 +38,41 @@ checkpoint、task input、tool call 和错误记录只保存哈希、大小、ID
 保存原文。候选初始版本标记 `user_confirmed=false`；确认总是派生一个新版本，
 复制来源证据并标记人工确认，原版本不被覆盖。
 
-`AccessContext` 来自服务端配置而不是请求参数。M1 只有一个本地 owner，这是一条
+`AccessContext` 来自服务端配置而不是请求参数。MVP 只有一个本地 owner，这是一条
 明确的部署限制，不等价于认证系统。所有人物、资料和记忆查询仍在 repository
 边界重复执行 owner 过滤，为以后替换成登录会话保留接口。
 
 原始 Blob 已应用层加密，但 chunk、候选和证据摘录为后续检索保存在数据库可读
 字段，因此仍要求磁盘/volume 加密。`source_verified` 表示可定位回授权资料，
 不表示内容已经由外部事实核验。
+
+## 确认记忆到回答的证据链
+
+    confirmed 当前 MemoryVersion
+              │
+              ├── Unicode feature-hash（离线默认）
+              └── EmbeddingSpace（provider/model/version/dimension/config hash）
+                              │
+    问题 ── owner/persona/status/visibility/source 硬过滤
+              ├── PostgreSQL FTS + pg_trgm（SQLite 测试回退）
+              ├── 当前 EmbeddingSpace 的 pgvector cosine
+              └── RRF 合并，保存每路 rank/score
+                              │
+                    EvidenceOnlyAnswerGenerator
+                              │
+                    CitationValidator
+                              │
+        Message + RetrievalRun + Citation + ModelCall + Audit
+
+不同 EmbeddingSpace 的距离从不直接比较。模型名、版本、维度、模板版本和配置
+哈希共同形成空间 ID；重向量任务在新空间追加向量，旧空间保留用于审计或回滚。
+检索语句始终显式指定一个空间，并在计算相似度前应用 owner/persona/confirmed/
+current-version 过滤。
+
+回答中的 citation 不是从自由文本脚注反向猜测，而是在生成后校验并作为结构化
+记录落库。每个 claim 至少引用本次召回集合中的一个 citation，citation 固定到
+MemoryVersion、Evidence、DocumentChunk 和 SourceDocument。没有超过召回阈值
+的证据时，服务返回固定“没有找到相关的已确认记忆”响应，并记录模型未调用。
 
 ## 模块关系
 
@@ -236,7 +264,6 @@ Runs 提交、状态与停止能力，再确认 API Server 没有启用任何 to
 
 ## 唯一下一里程碑
 
-M2 只实现 confirmed 当前版本的混合检索与带引用问答：登记 embedding space，
-禁止跨空间混用，结合 PostgreSQL 词法检索与向量召回，并在回答落库前验证每个
-citation 都能解析到当前 MemoryVersion、DocumentChunk 和 SourceDocument。
-证据不足必须返回明确的无记忆结果。登录、Web UI、删除和冲突图仍不混入 M2。
+M3 只实现记忆与资料的隐私生命周期：确认后版本化编辑、删除与派生清理、
+supports/conflicts/derived_from 关系、可验证导出和模型数据边界授权。删除验收
+必须覆盖 Blob、chunk、embedding、引用与检索结果，同时审计墓碑不保留正文。

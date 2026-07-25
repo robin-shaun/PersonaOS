@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from core.retrieval.service import MemoryIndexService
 from core.security.access import AccessContext
 from core.storage.blob import BlobStore
 from core.storage.persona_repository import PersonaRepository
@@ -19,11 +20,13 @@ class PersonaService:
         repository: PersonaRepository,
         execution_store: ExecutionStore,
         blob_store: BlobStore,
+        memory_index: MemoryIndexService | None = None,
         max_upload_bytes: int = 5 * 1024 * 1024,
     ) -> None:
         self._repository = repository
         self._execution_store = execution_store
         self._blob_store = blob_store
+        self._memory_index = memory_index
         self._max_upload_bytes = max(1, max_upload_bytes)
 
     def create(
@@ -211,13 +214,23 @@ class PersonaService:
             raise ValueError("edited_content must not exceed 20000 characters")
         if reason is not None and len(reason) > 4000:
             raise ValueError("reason must not exceed 4000 characters")
-        return self._repository.review_memory(
+        result = self._repository.review_memory(
             access,
             memory_id,
             action=action,
             edited_content=edited_content,
             reason=reason,
         )
+        if (
+            action == "confirm"
+            and result["memory"]["status"] == "confirmed"
+            and self._memory_index is not None
+        ):
+            result["indexing"] = self._memory_index.index_memory(
+                access,
+                memory_id,
+            )
+        return result
 
     def list_audit_events(
         self,

@@ -24,9 +24,16 @@ def test_initial_migration_matches_metadata(tmp_path, monkeypatch) -> None:
         "alembic_version",
         "audit_events",
         "document_chunks",
+        "embedding_spaces",
+        "persona_answer_citations",
+        "persona_conversation_messages",
+        "persona_conversations",
+        "persona_memory_embeddings",
+        "persona_model_calls",
         "persona_memories",
         "persona_memory_evidence",
         "persona_memory_versions",
+        "persona_retrieval_runs",
         "personas",
         "queue_jobs",
         "source_documents",
@@ -34,7 +41,7 @@ def test_initial_migration_matches_metadata(tmp_path, monkeypatch) -> None:
     } <= tables
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0001"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
         )
 
     command.check(config)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class AccessContext:
     """Authenticated actor boundary consumed by persona domain services.
 
-    M1 uses one server-configured local owner. Keeping this object independent
+    The local MVP uses one server-configured owner. Keeping this object independent
     from FastAPI makes a future login/session adapter replaceable without
     changing memory and ingestion services.
     """

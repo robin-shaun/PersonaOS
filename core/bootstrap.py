@@ -14,9 +14,15 @@ from core.config import Settings
 from core.evaluation.task_eval import ProjectMaintenanceEvaluator
 from core.ingestion.chunking import DeterministicTextChunker
 from core.ingestion.extractor import RulesMemoryCandidateExtractor
+from core.retrieval.answering import EvidenceOnlyAnswerGenerator
+from core.retrieval.embeddings import FeatureHashEmbeddingProvider
+from core.retrieval.repository import PersonaRetrievalRepository
+from core.retrieval.service import HybridRetrievalService, MemoryIndexService
 from core.security.access import AccessContext
 from core.services.github_connections import GitHubConnectionService
 from core.services.knowledge_ingestion import KnowledgeIngestionService
+from core.services.memory_reindex import MemoryReindexService
+from core.services.persona_qa import PersonaQuestionAnsweringService
 from core.services.personalization import PersonalizationService
 from core.services.personas import PersonaService
 from core.services.project_maintenance import (
@@ -45,6 +51,9 @@ class Container:
     personalization: PersonalizationService
     persona_access: AccessContext
     personas: PersonaService
+    memory_index: MemoryIndexService
+    persona_qa: PersonaQuestionAnsweringService
+    memory_reindex: MemoryReindexService
     knowledge_ingestion: KnowledgeIngestionService
     project_maintenance: ProjectMaintenanceService
     approvals: ApprovalService
@@ -121,6 +130,18 @@ def build_container(
     )
     personalization = PersonalizationService(store)
     persona_repository = PersonaRepository(database)
+    retrieval_repository = PersonaRetrievalRepository(database)
+    embedding_provider = FeatureHashEmbeddingProvider(
+        dimensions=settings.persona_embedding_dimensions
+    )
+    memory_index = MemoryIndexService(
+        repository=retrieval_repository,
+        embeddings=embedding_provider,
+    )
+    hybrid_retrieval = HybridRetrievalService(
+        repository=retrieval_repository,
+        embeddings=embedding_provider,
+    )
     blob_store = EncryptedLocalBlobStore(
         root=(
             settings.persona_blob_dir
@@ -144,7 +165,20 @@ def build_container(
         repository=persona_repository,
         execution_store=store,
         blob_store=blob_store,
+        memory_index=memory_index,
         max_upload_bytes=settings.persona_max_upload_bytes,
+    )
+    persona_qa = PersonaQuestionAnsweringService(
+        repository=retrieval_repository,
+        index=memory_index,
+        retrieval=hybrid_retrieval,
+        generator=EvidenceOnlyAnswerGenerator(),
+    )
+    memory_reindex = MemoryReindexService(
+        store=store,
+        workflows=workflows,
+        index=memory_index,
+        queue_max_attempts=settings.queue_max_attempts,
     )
     knowledge_ingestion = KnowledgeIngestionService(
         store=store,
@@ -178,11 +212,15 @@ def build_container(
         personalization=personalization,
         persona_access=persona_access,
         personas=personas,
+        memory_index=memory_index,
+        persona_qa=persona_qa,
+        memory_reindex=memory_reindex,
         knowledge_ingestion=knowledge_ingestion,
         project_maintenance=project_maintenance,
         approvals=ApprovalService(store, personalization),
         task_handlers={
             "daily-project-maintenance": project_maintenance,
             "persona-text-ingestion": knowledge_ingestion,
+            "persona-memory-reindex": memory_reindex,
         },
     )

@@ -38,6 +38,7 @@ class Settings:
     persona_blob_key: str | None = field(default=None, repr=False)
     persona_blob_key_path: Path | None = field(default=None, repr=False)
     persona_max_upload_bytes: int = 5 * 1024 * 1024
+    persona_embedding_dimensions: int = 384
 
     @classmethod
     def from_env(cls, base_dir: Path | None = None) -> Settings:
@@ -158,6 +159,12 @@ class Settings:
                 default=5 * 1024 * 1024,
                 minimum=1,
                 maximum=100 * 1024 * 1024,
+            ),
+            persona_embedding_dimensions=_env_int(
+                "PERSONA_EMBEDDING_DIMENSIONS",
+                default=384,
+                minimum=8,
+                maximum=16_000,
             ),
         )
 

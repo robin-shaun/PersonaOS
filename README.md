@@ -3,9 +3,9 @@
 一个本地优先、证据驱动、人工审核优先的开源数字员工与数字分身系统。
 
 PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选、人工确认版本和
-原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.7.0` 是
-M1：已经跑通“创建人物 → 导入文本 → 确定性切分 → 生成候选 → 人工确认/拒绝
-→ 查看证据和审计”的纵向闭环；检索问答与 Web 管理端仍在后续里程碑。
+原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.8.0` 已
+跑通 M2：“创建人物 → 导入文本 → 生成候选 → 人工确认 → 混合检索 → 带原始
+来源引用的问答”。Web 管理端与记忆隐私生命周期仍在后续里程碑。
 
 仓库也保留原有的 GitHub 项目维护数字员工：它只读取公共或已授权仓库，生成
 项目简报与 Issue 优先级建议，不修改 Issue、评论、PR 或 Release。建议必须
@@ -17,7 +17,7 @@ M1：已经跑通“创建人物 → 导入文本 → 确定性切分 → 生成
 下发到浏览器。当前通过 FastAPI `/docs` 操作；专用 React 管理端尚未实现。
 核心采用模块化单体和可替换适配器，避免把记忆语义锁进某个 Agent 框架。
 
-## 已实现的两个闭环
+## 已实现的两个产品闭环
 
     授权 UTF-8 文本 / Markdown
               ↓ AES-256-GCM 原始 Blob
@@ -26,8 +26,12 @@ M1：已经跑通“创建人物 → 导入文本 → 确定性切分 → 生成
        有来源的记忆候选
               ↓ 人工确认 / 修订 / 拒绝
      不可变 MemoryVersion + Evidence
+              ↓ 仅 confirmed 当前版本
+     Embedding Space + 词法/向量/RRF
               ↓
-       统一 AuditEvent
+     结构化回答 + 可解析 Citation
+              ↓ 无证据时不生成个人事实
+       Conversation / ModelCall / Audit
 
     GitHub 只读快照
           ↓
@@ -42,8 +46,9 @@ M1：已经跑通“创建人物 → 导入文本 → 确定性切分 → 生成
     产物、修改、反馈与决策记录
 
 模型运行时保留确定性的 `rules-v1` 作为免费、离线默认，也可通过隔离适配器接入
-Hermes Agent API。业务层只依赖 `AgentRuntime`；人物资料 M1 本身不调用模型，
-规则提取器只把原文片段变成待审核候选，不会自动确认或编造新事实。
+Hermes Agent API。业务层只依赖稳定协议；人物资料提取本身不调用模型，规则
+提取器只把原文片段变成待审核候选。人物问答的免费默认是本地
+`evidence-only` 生成器：它只复述召回的已确认记忆，不把推断写成事实。
 
 Personal Layer 还会把用户对数字员工输出的修改、拒绝和显式反馈保存为来源证据，
 生成待审核偏好。只有用户主动确认且未过期的偏好才会进入后续任务上下文。
@@ -90,15 +95,15 @@ API 与 Worker。API 默认监听 `127.0.0.1:18110`。
 .venv/bin/python -m apps.worker.run
 ~~~
 
-API 与 Worker 就绪后，可以运行不调用模型或付费服务的 M1 演示：
+API 与 Worker 就绪后，可以运行不调用模型或付费服务的 M2 演示：
 
 ~~~bash
 .venv/bin/python examples/persona_memory_demo.py
 ~~~
 
-脚本导入 `examples/data/demo-journal.md`，等待 Worker 处理，确认第一条候选，并
-输出人物免责声明、确认版本、原始文件定位、引用摘录和审计动作。若资料产生
-其他候选，它们仍保持 `candidate`，可在 `/docs` 中继续审核。
+脚本导入 `examples/data/demo-journal.md`，等待 Worker 处理，确认第一条候选，
+创建会话并提问，最后输出人物免责声明、回答、确认版本、原始文件定位、引用
+摘录、embedding space 和审计动作。其他候选仍保持 `candidate`。
 
 Worker 默认给每次执行 300 秒硬超时，并每 0.25 秒检查一次主动取消请求。
 可以通过 `DIGITAL_EMPLOYEE_WORKER_TASK_TIMEOUT_SECONDS` 和
@@ -308,6 +313,11 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | GET | /api/v1/personas/{id}/memories | 按状态查看人物记忆 |
 | GET | /api/v1/memories/{id} | 查看当前版本与原始来源证据 |
 | GET | /api/v1/personas/{id}/audit-events | 查看人物重要操作审计 |
+| POST | /api/v1/personas/{id}/conversations | 创建绑定人物和所有者的会话 |
+| GET | /api/v1/conversations/{id}/messages | 查看会话消息 |
+| POST | /api/v1/conversations/{id}/messages | 混合检索并生成带引用回答 |
+| GET | /api/v1/messages/{id}/citations | 展开回答对应的记忆版本和原始来源 |
+| POST | /api/v1/personas/{id}/memories/reindex | 入队幂等重向量任务 |
 | GET | /api/v1/runtime/status | 检查当前 Agent 运行时及 Hermes 工具边界 |
 | GET | /api/v1/employees | 查看岗位定义 |
 | GET | /api/v1/skills | 查看已注册 Skill |
@@ -340,6 +350,7 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
     core/
       agents/              Employee Definition 与 AgentRuntime
       ingestion/           可复现切分和可替换候选提取器
+      retrieval/           Embedding 空间、混合召回、回答与引用校验
       security/            请求外部的所有者/操作者上下文
       skills/              Skill 注册和权限检查
       workflows/           重试、条件、暂停与检查点
@@ -388,12 +399,16 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
   Compose 因此只绑定 `127.0.0.1`；不要反向代理到公网或不可信局域网。
 - 原始上传 Blob 使用 AES-256-GCM 加密；用于审核和后续检索的 chunk、候选内容
   与引用摘录仍以数据库可读字段保存。生产部署仍需要主机/卷加密和备份保护。
-- M1 提取器按可复现文本块生成候选并做粗粒度类型规则，不是完整的事实抽取或
+- 当前提取器按可复现文本块生成候选并做粗粒度类型规则，不是完整的事实抽取或
   语义归纳。`source_verified` 表示可验证地来自该资料，不表示客观世界事实。
-- 只有 `confirmed` 记忆可视为用户接受的长期记忆，但索引、混合检索、对话回答
-  和 citation 校验尚未实现；候选不会自动进入 Agent 上下文。
-- 人物记忆目前支持查看、确认、修订后确认和拒绝，尚不支持后续编辑、删除、
-  冲突关系、导出或重新向量化。
+- 只有 `confirmed` 当前版本会进入索引；检索在 owner/persona/status/visibility
+  硬过滤后合并词法和向量排名。候选、拒绝和旧版本不会进入回答上下文。
+- 离线 embedding 是 Unicode 特征哈希基线，能验证空间隔离和完整链路，但不等同
+  于高质量语义模型。切换模型/维度会创建新空间，必须显式执行重向量任务。
+- 人物回答默认仅复述证据，不是通用 LLM 综合回答。生成器接口和模型调用记录已
+  隔离，但外部/本地模型适配器及其数据边界授权尚未实现。
+- 人物记忆目前支持查看、确认、修订后确认、拒绝和重新向量化，尚不支持确认后
+  编辑、删除、冲突关系或导出。
 - Docker Compose 已覆盖数据库、API 和 Worker；专用 Web UI 尚未实现，当前用
   `/docs` 与演示脚本操作。本环境没有 Docker 时仍可用 SQLite 跑测试和主机演示。
 - Skill 定义已声明输入/输出、权限、工具、超时、重试、风险、确认、测试、示例
@@ -409,6 +424,6 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-唯一下一里程碑是 M2：只索引用户已确认的当前记忆版本，实现词法/向量混合
-检索、严格人物归属过滤，以及每个事实都有可验证 citation 的问答；没有证据时
-必须明确回答“没有找到相关记忆”。
+唯一下一里程碑是 M3：实现确认记忆的版本化编辑、删除与派生清理、来源删除、
+支持/冲突/派生关系和可验证导出，并用测试证明删除后 Blob、chunk、embedding
+和检索结果均不可恢复，同时审计记录不保留正文。

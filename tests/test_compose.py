@@ -16,7 +16,7 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     assert set(services) == {"api", "db", "worker"}
     assert services["db"]["image"] == ("pgvector/pgvector:0.8.5-pg17-bookworm")
     assert services["api"]["ports"] == ["127.0.0.1:18110:18110"]
-    assert services["api"]["image"] == "personaos:0.7.0"
+    assert services["api"]["image"] == "personaos:0.8.0"
     assert services["worker"]["image"] == services["api"]["image"]
     assert "alembic upgrade head" in services["api"]["command"][-1]
     assert (
@@ -25,3 +25,4 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     assert services["worker"]["depends_on"]["api"]["condition"] == ("service_healthy")
     assert services["api"]["volumes"] == ["personaos-private:/app/var"]
     assert services["worker"]["volumes"] == ["personaos-private:/app/var"]
+    assert services["api"]["environment"]["PERSONA_EMBEDDING_DIMENSIONS"] == "384"

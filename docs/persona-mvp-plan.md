@@ -1,14 +1,14 @@
 # PersonaOS 数字分身 MVP 实施方案
 
-- 状态：已评审的实施基线；M1 已实现
+- 状态：已评审的实施基线；M1、M2 已实现
 - 日期：2026-07-25
 - 仓库基线：`37daaa3` (`main`)
 - 适用范围：第一阶段“数字员工”向第二阶段“证据驱动的数字分身”演进
 
-> 实施进展（2026-07-25）：仓库版本已进入 `0.7.0`。M1 的人物创建、加密文本
-> 导入、确定性分块、来源绑定候选、人工确认/拒绝、不可变确认版本和统一审计
-> 已落地。为满足本地可运行验收，PostgreSQL/pgvector、API、Worker 的 Compose
-> 基线也提前交付；它不包含 M4 的 React Web UI。第 2–4 节仍保留审计当时的
+> 实施进展（2026-07-25）：仓库版本已进入 `0.8.0`。M1 的审核优先资料入口与
+> M2 的 embedding 空间、重向量任务、混合检索、对话、结构化回答、citation
+> 校验和无证据边界均已落地。PostgreSQL/pgvector、API、Worker 的 Compose
+> 基线已交付；它不包含 M4 的 React Web UI。第 2–4 节仍保留审计当时的
 > `0.6.0` 事实快照，避免用后来实现篡改基线。
 
 ## 1. 结论
@@ -580,7 +580,7 @@ CI、依赖锁定和发布说明。README 在五分钟内演示完整闭环，�
 每个里程碑独立可运行、可测试、可演示。不得为了后续里程碑提前创建没有行为的
 空目录或大量 TODO。
 
-## 15. M1 实施结果与唯一下一里程碑
+## 15. M1、M2 实施结果与唯一下一里程碑
 
 M1 已按以下边界落地：
 
@@ -593,23 +593,37 @@ M1 已按以下边界落地：
 7. Alembic 基线与 PostgreSQL/pgvector Compose 已加入，SQLite 保留兼容测试；
 8. 原始正文不进入 task/workflow/tool trace，候选不会被自动确认。
 
-当前实现有意没有加入 embedding、检索、聊天或模型总结。规则提取器中的
-`source_verified` 只表示内容能逐字定位回资料，并不证明资料陈述是客观事实。
+M2 在此基础上增加：
 
-本轮验证结果为：`43 passed`；Ruff 静态检查通过；SQLite 基线 migration 完成
-upgrade/check/downgrade/upgrade 往返；PostgreSQL 离线 migration SQL 可编译；
-真实 API 与 Worker 进程完成演示资料导入和人工确认。执行环境没有 Docker，
-因此 Compose 只完成 YAML/安全约束自动化测试，尚未在本机实际拉取镜像启动。
+1. embedding space 由 provider、模型名/版本、维度、模板和配置哈希唯一标识；
+2. 只为 confirmed 当前版本写向量，新空间重向量时不覆盖旧空间；
+3. 检索先执行 owner/persona/status/visibility/source 硬过滤，再合并词法、
+   当前空间 cosine 和 RRF 排名；
+4. Conversation、Message、RetrievalRun、ModelCall 和 AnswerCitation 均持久化；
+5. 每个 claim 的 citation 在落库前校验，并固定到当前 MemoryVersion、Evidence、
+   DocumentChunk 和 SourceDocument；
+6. 没有证据时返回固定边界响应，模型调用记录为 `skipped`；
+7. 固定评测检查越权召回、embedding 空间串用、悬空引用和无证据边界。
 
-唯一下一里程碑是 **M2：确认记忆的混合检索与带引用问答**。只允许 confirmed
-当前版本进入索引；检索必须先按 owner/persona 过滤，再合并词法与向量结果；
-回答中的每个 citation 都必须解析到 MemoryVersion、chunk 和原文件定位，证据
-不足时返回明确的无记忆结果。
+当前离线 embedding 是可复现的 Unicode 特征哈希，不是高质量语义模型；回答
+生成器只复述证据，不做开放式模型归纳。`source_verified` 仍只表示内容能逐字
+定位回资料，并不证明资料陈述是客观事实。
+
+本轮验证结果为：`47 passed`；新增代码 Ruff 静态检查通过；SQLite migration
+完成 upgrade/check/downgrade；API/Worker 自动化测试完成候选闸门、问答引用和
+重向量任务。执行环境没有 Docker，因此 Compose 只完成配置与安全约束测试，
+真实 PostgreSQL/pgvector 容器查询尚未在本机执行。
+
+唯一下一里程碑是 **M3：记忆管理、冲突和隐私生命周期**。实现确认后版本化
+编辑、来源和记忆删除、派生数据清理、关系图及导出；删除测试必须证明 Blob、
+chunk、embedding 和搜索结果均已移除，审计中不残留正文。
 
 ## 16. 调研依据
 
 - [pgvector 官方 README](https://github.com/pgvector/pgvector)：精确/HNSW/IVFFlat、
   hybrid search、不同维度向量和 partial index；
+- [pgvector-python 官方 README](https://github.com/pgvector/pgvector-python)：
+  SQLAlchemy `VECTOR` 类型、cosine distance 和 Psycopg 适配；
 - [PostgreSQL 全文检索文档](https://www.postgresql.org/docs/current/textsearch-controls.html)：
   `tsvector`、`tsquery`、`ts_rank_cd` 和 headline；
 - [PostgreSQL Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)：

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -733,3 +734,267 @@ class AuditEventRecord(Base):
     before_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     after_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class EmbeddingSpaceRecord(Base):
+    __tablename__ = "embedding_spaces"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "model_name",
+            "model_version",
+            "dimensions",
+            "distance_metric",
+            "normalization",
+            "document_template_version",
+            "query_template_version",
+            "config_hash",
+            "data_boundary",
+            name="uq_embedding_space_definition",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'retired')",
+            name="ck_embedding_space_status",
+        ),
+        CheckConstraint(
+            "data_boundary IN ('local', 'private_network', 'external')",
+            name="ck_embedding_space_data_boundary",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(100), index=True)
+    model_name: Mapped[str] = mapped_column(String(200))
+    model_version: Mapped[str] = mapped_column(String(100))
+    dimensions: Mapped[int] = mapped_column(Integer)
+    distance_metric: Mapped[str] = mapped_column(
+        String(40), default="cosine", nullable=False
+    )
+    normalization: Mapped[str] = mapped_column(String(40), default="l2", nullable=False)
+    document_template_version: Mapped[str] = mapped_column(String(50))
+    query_template_version: Mapped[str] = mapped_column(String(50))
+    config_hash: Mapped[str] = mapped_column(String(64))
+    data_boundary: Mapped[str] = mapped_column(
+        String(40), default="local", nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(40), default="active", index=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class PersonaMemoryEmbeddingRecord(Base):
+    __tablename__ = "persona_memory_embeddings"
+    __table_args__ = (
+        UniqueConstraint(
+            "memory_version_id",
+            "embedding_space_id",
+            name="uq_persona_memory_embedding_space",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    memory_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memories.id"), index=True
+    )
+    memory_version_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memory_versions.id"), index=True
+    )
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    embedding_space_id: Mapped[str] = mapped_column(
+        ForeignKey("embedding_spaces.id"), index=True
+    )
+    embedding: Mapped[list[float]] = mapped_column(
+        JSON().with_variant(VECTOR(), "postgresql"),
+        nullable=False,
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class ConversationRecord(Base):
+    __tablename__ = "persona_conversations"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'archived', 'deleted')",
+            name="ck_persona_conversation_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(40), default="active", index=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class ConversationMessageRecord(Base):
+    __tablename__ = "persona_conversation_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user', 'assistant')",
+            name="ck_persona_message_role",
+        ),
+        CheckConstraint(
+            "answer_status IN ('not_applicable', 'answered', 'no_memory')",
+            name="ck_persona_message_answer_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_conversations.id"), index=True
+    )
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(40), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    answer_status: Mapped[str] = mapped_column(
+        String(40), default="not_applicable", nullable=False
+    )
+    claims: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    uncertainty: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    simulation_notice: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class RetrievalRunRecord(Base):
+    __tablename__ = "persona_retrieval_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_message_id",
+            name="uq_persona_retrieval_user_message",
+        ),
+        CheckConstraint(
+            "status IN ('completed', 'no_evidence', 'failed')",
+            name="ck_persona_retrieval_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_conversations.id"), index=True
+    )
+    user_message_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_conversation_messages.id"), index=True
+    )
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    embedding_space_id: Mapped[str] = mapped_column(
+        ForeignKey("embedding_spaces.id"), index=True
+    )
+    query_sha256: Mapped[str] = mapped_column(String(64))
+    filters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    top_k: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class PersonaModelCallRecord(Base):
+    __tablename__ = "persona_model_calls"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('completed', 'failed', 'skipped')",
+            name="ck_persona_model_call_status",
+        ),
+        CheckConstraint(
+            "data_boundary IN ('local', 'private_network', 'external')",
+            name="ck_persona_model_call_data_boundary",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    retrieval_run_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_retrieval_runs.id"), index=True
+    )
+    assistant_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("persona_conversation_messages.id"), index=True, nullable=True
+    )
+    provider: Mapped[str] = mapped_column(String(100))
+    model_name: Mapped[str] = mapped_column(String(200))
+    model_version: Mapped[str] = mapped_column(String(100))
+    prompt_template_version: Mapped[str] = mapped_column(String(50))
+    data_boundary: Mapped[str] = mapped_column(String(40))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    response_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    usage: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    error_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class AnswerCitationRecord(Base):
+    __tablename__ = "persona_answer_citations"
+    __table_args__ = (
+        UniqueConstraint(
+            "assistant_message_id",
+            "citation_id",
+            name="uq_persona_answer_citation",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    assistant_message_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_conversation_messages.id"), index=True
+    )
+    retrieval_run_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_retrieval_runs.id"), index=True
+    )
+    citation_id: Mapped[str] = mapped_column(String(20))
+    claim_indexes: Mapped[list[int]] = mapped_column(JSON, default=list, nullable=False)
+    memory_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memories.id"), index=True
+    )
+    memory_version_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memory_versions.id"), index=True
+    )
+    evidence_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memory_evidence.id"), index=True
+    )
+    source_document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id"), index=True
+    )
+    document_chunk_id: Mapped[str] = mapped_column(
+        ForeignKey("document_chunks.id"), index=True
+    )
+    locator_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    excerpt: Mapped[str] = mapped_column(Text)
+    rank: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )

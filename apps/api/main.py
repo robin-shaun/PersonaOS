@@ -21,13 +21,16 @@ from apps.api.schemas import (
     ApprovalDecisionRequest,
     FeedbackCreate,
     GitHubConnectionCreate,
+    PersonaConversationCreate,
     PersonaCreate,
     PersonaMemoryReviewRequest,
+    PersonaQuestionCreate,
     PreferenceReviewRequest,
     ProjectMaintenanceTaskCreate,
     TaskCancellationRequest,
 )
 from core.bootstrap import Container, build_container
+from core.retrieval.answering import CitationValidationError
 from core.services.github_connections import GitHubAppNotConfiguredError
 from core.services.project_maintenance import (
     ProjectMaintenanceCommand,
@@ -40,7 +43,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="PersonaOS",
-        version="0.7.0",
+        version="0.8.0",
         description=(
             "Evidence-driven digital employee and review-first persona memory. "
             "Every long-term memory remains traceable to authorized source text."
@@ -94,6 +97,9 @@ def create_app(container: Container | None = None) -> FastAPI:
             "queue": container.store.queue_summary(),
             "persona_identity_mode": "local_single_owner",
             "persona_blob_encryption": "AES-256-GCM",
+            "persona_embedding_space_id": (
+                container.memory_index.embedding_space_id
+            ),
         }
 
     @app.post(
@@ -305,6 +311,126 @@ def create_app(container: Container | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/personas/{persona_id}/conversations",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_persona_conversation(
+        persona_id: str,
+        payload: PersonaConversationCreate,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.persona_qa.create_conversation(
+                persona_access(request),
+                persona_id=persona_id,
+                title=payload.title,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/conversations/{conversation_id}/messages")
+    async def list_persona_conversation_messages(
+        conversation_id: str,
+        request: Request,
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.persona_qa.list_messages(
+                persona_access(request),
+                conversation_id=conversation_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/conversations/{conversation_id}/messages",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def ask_persona(
+        conversation_id: str,
+        payload: PersonaQuestionCreate,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return await container.persona_qa.ask(
+                persona_access(request),
+                conversation_id=conversation_id,
+                question=payload.content,
+                top_k=payload.top_k,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except CitationValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="answer generator returned invalid citations",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/messages/{message_id}/citations")
+    async def get_persona_answer_citations(
+        message_id: str,
+        request: Request,
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.persona_qa.get_citations(
+                persona_access(request),
+                message_id=message_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/personas/{persona_id}/memories/reindex",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def reindex_persona_memories(
+        persona_id: str,
+        request: Request,
+        idempotency_key: str | None = Header(
+            default=None,
+            alias="Idempotency-Key",
+            max_length=200,
+        ),
+    ) -> dict[str, Any]:
+        try:
+            return container.memory_reindex.enqueue(
+                persona_access(request),
+                persona_id=persona_id,
+                idempotency_key=idempotency_key,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
 

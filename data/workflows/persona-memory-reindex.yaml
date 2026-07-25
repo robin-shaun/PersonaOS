@@ -1,0 +1,8 @@
+name: persona-memory-reindex
+version: 1.0.0
+description: 在一个明确的 Embedding 空间内重新索引所有当前已确认记忆。
+
+steps:
+  - id: reindex
+    uses: memory.reindex_confirmed
+    retries: 1
