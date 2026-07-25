@@ -14,11 +14,14 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     services = compose["services"]
 
     assert set(services) == {"api", "db", "web", "worker"}
-    assert services["db"]["image"] == ("pgvector/pgvector:0.8.5-pg17-bookworm")
+    assert services["db"]["image"] == (
+        "pgvector/pgvector:0.8.5-pg17-bookworm@"
+        "sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0"
+    )
     assert services["api"]["ports"] == ["127.0.0.1:18110:18110"]
-    assert services["api"]["image"] == "personaos:0.10.0"
+    assert services["api"]["image"] == "personaos:0.11.0"
     assert services["worker"]["image"] == services["api"]["image"]
-    assert services["web"]["image"] == "personaos-web:0.10.0"
+    assert services["web"]["image"] == "personaos-web:0.11.0"
     assert services["web"]["ports"] == ["127.0.0.1:18111:8080"]
     assert services["web"]["build"]["dockerfile"] == "apps/web/Dockerfile"
     assert "alembic upgrade head" in services["api"]["command"][-1]

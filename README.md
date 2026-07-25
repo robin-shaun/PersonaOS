@@ -1,15 +1,27 @@
 # PersonaOS
 
+[![CI](https://github.com/robin-shaun/PersonaOS/actions/workflows/ci.yml/badge.svg)](https://github.com/robin-shaun/PersonaOS/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-3776ab.svg)](.python-version)
+[![Node 22](https://img.shields.io/badge/node-22-339933.svg)](.node-version)
+
 一个本地优先、证据驱动、人工审核优先的开源数字员工与数字分身系统。
 
 PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选、人工确认版本和
-原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.10.0` 已
-跑通 M4：“创建人物 → 导入文本 → 人工确认 → 混合检索与引用问答 → 版本化
-修改、关系、导出或可证明删除”，并用专用 Web 工作台呈现整个证据链。
+原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.11.0` 已
+跑通“创建人物 → 导入文本 → 人工确认 → 混合检索与引用问答 → 版本化修改、
+关系、导出或可证明删除”，并用专用 Web 工作台呈现整个证据链。核心闭环无需
+API Key 或付费服务。
 
 仓库也保留原有的 GitHub 项目维护数字员工：它只读取公共或已授权仓库，生成
 项目简报与 Issue 优先级建议，不修改 Issue、评论、PR 或 Release。建议必须
 经过人工审批，用户选择会成为可审核的偏好证据。
+
+**文档入口：** [五分钟演示](#五分钟本地演示) ·
+[架构](docs/architecture.md) · [API](docs/api.md) ·
+[Skill 开发](docs/skill-development.md) · [路线图](ROADMAP.md) ·
+[贡献](CONTRIBUTING.md) · [安全](SECURITY.md) ·
+[0.11.0 发布说明](docs/releases/v0.11.0.md)
 
 ## 产品形态
 
@@ -17,6 +29,8 @@ PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选�
 网关运行在服务端，密钥不会下发到浏览器。生产静态页面由非 root Nginx 提供，
 `/api/*` 同源转发到 FastAPI；核心仍是模块化单体和可替换适配器，避免把记忆
 语义锁进某个前端或 Agent 框架。
+
+![PersonaOS 本地优先证据架构](docs/architecture.svg)
 
 ## 已实现的两个产品闭环
 
@@ -54,24 +68,46 @@ Hermes Agent API。业务层只依赖稳定协议；人物资料提取本身不�
 Personal Layer 还会把用户对数字员工输出的修改、拒绝和显式反馈保存为来源证据，
 生成待审核偏好。只有用户主动确认且未过期的偏好才会进入后续任务上下文。
 
-## 快速启动
+## 真实性、伦理与算力边界
 
-需要 Docker Compose；主机开发模式需要 Python 3.11 或更高版本，修改 Web
-工作台需要 Node.js 22.12 或更高版本。
+- PersonaOS 是根据授权资料生成输出的软件，不是现实中的本人，不上传意识、
+  不复活逝者，也不自动取得本人身份、同意权或判断权；
+- `source_verified` 只表示文字可以定位回原始资料，不表示资料里的陈述在客观
+  世界为真；总结、推断、用户设定和临时生成内容必须保持不同标签；
+- 没有证据时系统会表达“不确定”或“没有找到相关记忆”，不能让模型补写历史；
+- 当前 MVP 只处理文本，没有实现 ASR、TTS、口型、表情或数字人渲染；
+- 未来数字人会把形象初始化、文本生成、TTS、面部驱动和渲染分开。生成一次人物
+  形象不意味着之后零成本运行：TTS、神经渲染或视频生成在运行时仍可能持续消耗
+  CPU/GPU，具体需求取决于适配器；
+- 当前没有可信登录或远程多租户，只允许本机单所有者使用。
+
+## 五分钟本地演示
+
+需要 Docker Engine 与 Docker Compose。主机开发基线是 Python 3.11.15；修改
+Web 工作台需要 Node.js 22.23.1。首次构建需要下载容器和开源依赖。
 
 最完整的本地基线使用 Docker Compose，一次启动 PostgreSQL/pgvector、API、
 Worker 和 Web：
 
 ~~~bash
-docker compose up --build
+git clone https://github.com/robin-shaun/PersonaOS.git
+cd PersonaOS
+docker compose up --build --detach --wait
 ~~~
 
-打开 http://127.0.0.1:18111。首次进入可以创建人物，也可以点击“载入虚构演示
-人物”；后者不需要 API Key，不调用付费模型，且仍要求用户逐条审核候选。FastAPI
-文档保留在 http://127.0.0.1:18110/docs。
+打开 http://127.0.0.1:18111，然后完成：
+
+1. 点击“载入虚构演示人物”；系统只上传仓库内的虚构日记；
+2. 在“任务”看到资料处理完成，在“候选审核”逐条核对并明确确认一条；
+3. 到“问答”提问“我什么时候加入 PersonaOS 项目？”；
+4. 展开回答的 `C1`，检查文件名、原文摘录和行号定位；
+5. 在“记忆”查看不可变版本，在“审计”查看创建、上传、处理、确认和问答事件。
+
+演示不需要 API Key，不调用付费模型，也不会自动确认候选。FastAPI 交互文档位于
+http://127.0.0.1:18110/docs。
 
 Web 与 API 都只映射到本机回环地址；Compose 会先执行 Alembic migration，并让
-API 与 Worker 共享加密 Blob 密钥卷。可从另一个终端执行完整的空环境 smoke：
+API 与 Worker 共享加密 Blob 密钥卷。还可以执行自动化的空环境 smoke：
 
 ~~~bash
 python3 examples/compose_smoke.py
@@ -88,19 +124,21 @@ docker compose down
 不删除 named volumes 就会保留数据库、原始资料密文和密钥。`docker compose
 down -v` 会永久删除这些本地数据，不应用作普通停止命令。
 
-也可以使用向后兼容的轻量主机启动方式（SQLite）：
+没有 Docker 时，可以使用向后兼容的轻量主机启动方式（SQLite）：
 
 ~~~bash
 ./start.sh
 ~~~
 
 第一次运行会自动创建 `.env` 和 `.venv`、安装运行依赖，然后在同一终端启动
-API 与 Worker。启动前会对全新、已版本化或可明确识别的 M1/M2 SQLite 执行
+API 与 Worker。依赖从带 SHA-256 的 `requirements.lock` 安装。启动前会对
+全新、已版本化或可明确识别的 M1/M2 SQLite 执行
 Alembic 升级和 schema check；无法明确识别的部分迁移人物库会拒绝猜测。API
 默认监听 `127.0.0.1:18110`。包含真实资料的数据库在首次跨版本启动前仍应先
 备份数据库文件、Blob 目录和密钥。
 打开 http://127.0.0.1:18110/docs 查看交互式 API，按 `Ctrl+C` 会统一停止
-本脚本启动的所有进程。依赖更新后可以强制重新安装：
+本脚本启动的所有进程。脚本记录 lock 的 SHA-256，依赖锁变化时会自动重装；
+也可以强制重新安装：
 
 ~~~bash
 ./start.sh --install
@@ -333,6 +371,10 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 
 ## API
 
+完整的身份、错误、幂等、并发、删除和 citation 语义见
+[API 指南](docs/api.md)。运行时 Swagger UI 位于 `/docs`；提交的
+[OpenAPI 0.11.0 快照](docs/openapi.json) 由 CI 检查，不能手工编辑。
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | /health | 运行状态、安全模式与队列计数 |
@@ -410,29 +452,62 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
       workflows/           Workflow 定义与版本
     migrations/            Alembic schema 演进
     examples/              无付费服务的最小人物演示与 Compose smoke
+    scripts/               依赖锁、OpenAPI 与发布一致性工具
+    docs/                  架构、ADR、API、Skill 与发布说明
     tests/                 核心闭环和 API 测试
+    .github/               最小权限 CI、依赖更新与贡献模板
 
 当前数字员工设计与安全边界见 [docs/architecture.md](docs/architecture.md)。
 向证据驱动数字分身演进的仓库审计、架构取舍和分阶段验收标准见
 [docs/persona-mvp-plan.md](docs/persona-mvp-plan.md)。版本、模型边界和删除语义
 记录在 [ADR 0001](docs/adr/0001-memory-privacy-lifecycle.md)，Web 同源部署边界
-记录在 [ADR 0002](docs/adr/0002-local-web-workspace.md)。
+记录在 [ADR 0002](docs/adr/0002-local-web-workspace.md)，可复现发布决策记录在
+[ADR 0003](docs/adr/0003-reproducible-open-source-release.md)。
+
+## 开源协作
+
+项目采用 [Apache-2.0](LICENSE)。提交代码前请阅读
+[贡献指南](CONTRIBUTING.md) 与 [社区行为准则](CODE_OF_CONDUCT.md)；漏洞通过
+[私密 Security Advisory](SECURITY.md) 报告，不要把未修复细节或人物资料放进
+公开 Issue。当前版本的变化见 [CHANGELOG](CHANGELOG.md)，阶段与唯一下一
+里程碑见 [ROADMAP](ROADMAP.md)。
 
 ## 测试
 
 ~~~bash
+.venv/bin/python -m pip install \
+  --index-url https://pypi.org/simple \
+  --require-hashes \
+  -r requirements-dev.lock
+.venv/bin/python -m pip install \
+  --index-url https://pypi.org/simple \
+  --no-deps \
+  --no-build-isolation \
+  -e .
+.venv/bin/ruff check adapters apps core examples migrations scripts tests
 .venv/bin/pytest -q
-.venv/bin/ruff check apps core examples migrations tests
-(cd apps/web && npm ci && npm test && npm run build)
+.venv/bin/python scripts/export_openapi.py --check
+.venv/bin/python scripts/release_check.py
+.venv/bin/pip-audit --require-hashes -r requirements.lock
+
+(cd apps/web && npm ci && npm test && npm run build && npm audit --audit-level=high)
+
 DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
   .venv/bin/alembic upgrade head
 DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
   .venv/bin/alembic check
+
+docker compose config --quiet
+docker compose up --build --detach --wait
+python3 examples/compose_smoke.py
+docker compose down
 ~~~
 
 Python 测试使用隔离的内存或临时数据库、伪造的 GitHub 快照和模拟 Hermes HTTP
 网关；Web 组件测试模拟同一套 HTTP 契约。两者都不消耗 GitHub 或模型 API 配额。
 手动迁移检查命令会创建本地测试数据库；不要把它指向包含真实资料的数据库。
+GitHub CI 还会在一次性 runner 中执行 PostgreSQL/pgvector、Worker、API 和
+Nginx 的真实 Compose smoke，并在结束时删除专用 CI volume。
 
 ## 当前边界
 
@@ -469,12 +544,13 @@ Python 测试使用隔离的内存或临时数据库、伪造的 GitHub 快照�
 - Blob 引用检查和上传/删除在单 API 进程内加锁。多 API 副本需要数据库级对象
   引用租约或独立对象存储协调器后，才可安全并发执行来源删除。
 - Docker Compose 已覆盖数据库、API、Worker 和非 root Web 静态服务；Web 只
-  通过同源代理访问 API，并设置 CSP、禁止嵌入和摄像头/麦克风/定位权限。本环境
-  没有 Docker 时仍可用 SQLite 跑测试和主机演示；真实 Compose 容器仍需在安装
-  Docker 的主机上验证。
+  通过同源代理访问 API，并设置 CSP、禁止嵌入和摄像头/麦克风/定位权限。CI
+  会从空 volume 运行真实 Compose smoke；没有 Docker 的本地开发机仍可用
+  SQLite 跑测试和主机演示。
 - Skill 定义已声明输入/输出、权限、工具、超时、重试、风险、确认、测试、示例
-  和依赖；现有模型 Skill 会执行工具/权限/超时检查。但本版本尚无第三方 Skill
-  安装、启停、升级、独立进程/容器隔离或自动回滚，不能运行不可信社区代码。
+  和依赖；现有模型 Skill 会执行工具/权限/超时检查。manifest 的重试、确认和
+  依赖声明仍需 Workflow/service 显式落实；本版本尚无第三方 Skill 安装、启停、
+  升级、独立进程/容器隔离或自动回滚，不能运行不可信社区代码。
 - 原有数字员工 API 的 `user_id` 仍是调用方提供的本地标识，不是可信身份。
 - `rules-v1` 只依据标签、讨论、reaction 与更新时间排序；Hermes 输出也必须
   通过结构校验、证据质量门禁和人工审批，两者都不替代维护者判断。
@@ -484,6 +560,8 @@ Python 测试使用隔离的内存或临时数据库、伪造的 GitHub 快照�
   冲突检测。
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
+- lock、digest、依赖审计和 CI 降低供应链漂移，但不能证明所有上游代码安全；
+  0.11.0 尚未经过独立渗透测试或密码学审计。
 
-唯一下一里程碑是 M5：补齐开源发布门槛，包括许可证、贡献与 Skill 开发指南、
-安全策略、稳定 API 文档、CI、发布说明和五分钟项目介绍。
+唯一下一里程碑是 **M6：可信本地账户与人物空间隔离**。先让两个账户的资料、
+检索、导出、任务和审计具备可验证的零越权边界，再扩大数字分身的人物建模。

@@ -21,7 +21,6 @@ from adapters.github.models import (
     RepositorySnapshot,
 )
 
-
 _READ_ONLY_PERMISSIONS = {
     "issues": "read",
     "pull_requests": "read",

@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -11,7 +11,12 @@ RUN groupadd --system personaos \
 
 COPY --chown=personaos:personaos . /app
 
-RUN python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --index-url https://pypi.org/simple --require-hashes -r requirements.lock \
+    && python -m pip install --no-cache-dir \
+        --index-url https://pypi.org/simple \
+        --no-deps \
+        --no-build-isolation \
+        .
 
 RUN mkdir -p /app/var \
     && chown -R personaos:personaos /app/var

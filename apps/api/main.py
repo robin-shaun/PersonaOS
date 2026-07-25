@@ -42,13 +42,14 @@ from core.services.project_maintenance import (
     TaskConflictError,
     TaskExecutionFailed,
 )
+from core.version import VERSION
 
 
 def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="PersonaOS",
-        version="0.10.0",
+        version=VERSION,
         description=(
             "Evidence-driven digital employee and review-first persona memory "
             "with versioned edits, model data boundaries and auditable deletion."

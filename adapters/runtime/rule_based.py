@@ -6,7 +6,6 @@ from typing import Any
 from adapters.github.models import GitHubIssue, RepositorySnapshot
 from core.agents.runtime import AgentResult, AgentRuntime
 
-
 _LABEL_WEIGHTS = {
     "security": 100,
     "critical": 90,

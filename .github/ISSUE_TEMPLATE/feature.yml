@@ -1,0 +1,32 @@
+name: 功能建议
+description: 提议一个有明确边界、可验证的产品能力
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户问题
+      description: 说明谁在什么场景下遇到了什么问题，不要只描述技术方案。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 可验证结果
+      description: 什么行为出现时，可以认为这个问题已经解决？
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 真实性、权限和数据边界
+      description: 说明来源、推断、敏感数据、模型供应商和人工确认会如何处理。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 列出已经考虑过的更小实现或现有组件。

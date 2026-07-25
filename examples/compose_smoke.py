@@ -1,4 +1,4 @@
-"""Run the free PersonaOS M4 vertical smoke test through the Web origin.
+"""Run the free PersonaOS release smoke test through the Web origin.
 
 The test intentionally creates one fictional persona and keeps it available so
 the result can be inspected in the UI. It never calls a paid model.
@@ -152,7 +152,7 @@ def run(base_url: str, timeout: float) -> dict[str, Any]:
         "/api/v1/personas",
         {
             "display_name": f"Compose Smoke {suffix}",
-            "description": "M4 空环境纵向验收使用的虚构人物。",
+            "description": "PersonaOS 空环境纵向验收使用的虚构人物。",
         },
     )
     require("不是现实中的本人" in persona["simulation_notice"], "notice missing")
@@ -191,7 +191,7 @@ def run(base_url: str, timeout: float) -> dict[str, Any]:
     conversation = client.json(
         "POST",
         f"/api/v1/personas/{persona['id']}/conversations",
-        {"title": "M4 Compose smoke"},
+        {"title": "PersonaOS Compose smoke"},
     )
     answer = client.json(
         "POST",
@@ -240,7 +240,7 @@ def run(base_url: str, timeout: float) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Verify the M4 PersonaOS flow through the Web origin."
+        description="Verify the PersonaOS release flow through the Web origin."
     )
     parser.add_argument(
         "--base-url",
@@ -257,7 +257,7 @@ def main() -> int:
     try:
         result = run(args.base_url, args.timeout)
     except (OSError, SmokeError, URLError) as exc:
-        print(f"M4 smoke failed: {exc}", file=sys.stderr)
+        print(f"PersonaOS smoke failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

@@ -1,17 +1,19 @@
 # PersonaOS 数字分身 MVP 实施方案
 
-- 状态：已评审的实施基线；M1、M2、M3、M4 已实现
+- 状态：已评审的实施基线；M1、M2、M3、M4、M5 已实现
 - 日期：2026-07-25
 - 仓库基线：`37daaa3` (`main`)
 - 适用范围：第一阶段“数字员工”向第二阶段“证据驱动的数字分身”演进
 
-> 实施进展（2026-07-25）：仓库版本已进入 `0.10.0`。M1 的审核优先资料入口与
+> 实施进展（2026-07-25）：仓库版本已进入 `0.11.0`。M1 的审核优先资料入口与
 > M2 的 embedding 空间、重向量任务、混合检索、对话、结构化回答、citation
 > 校验和无证据边界均已落地。M3 已增加确认后版本编辑、记忆关系、敏感等级与
 > 模型数据边界、可校验导出以及记忆/来源的级联删除。M4 已交付 React 工作台、
 > 同源非 root Web 容器、免费虚构 Demo 和空环境 smoke；Compose 现在覆盖
-> PostgreSQL/pgvector、API、Worker 与 Web。第 2–4 节仍保留审计当时的 `0.6.0`
-> 事实快照，避免用后来实现篡改基线。
+> PostgreSQL/pgvector、API、Worker 与 Web。M5 补齐 Apache-2.0、社区与安全
+> 政策、API/Skill/路线图/发布文档、依赖和镜像锁定、最小权限 CI、OpenAPI
+> 快照及可执行 release gate。第 2–5 节仍保留审计当时的 `0.6.0` 事实快照，
+> 避免用后来实现篡改基线。
 
 ## 1. 结论
 
@@ -582,7 +584,7 @@ CI、依赖锁定和发布说明。README 在五分钟内演示完整闭环，�
 每个里程碑独立可运行、可测试、可演示。不得为了后续里程碑提前创建没有行为的
 空目录或大量 TODO。
 
-## 15. M1、M2、M3、M4 实施结果与唯一下一里程碑
+## 15. M1、M2、M3、M4、M5 实施结果与唯一下一里程碑
 
 M1 已按以下边界落地：
 
@@ -643,6 +645,23 @@ M4 把上述能力形成可操作产品入口：
 7. 前端精确版本写入 npm lockfile，组件测试覆盖人物创建、人工审核门禁和可解析
    citation，生产构建同时执行严格 TypeScript 检查。
 
+M5 把工程闭环提升为可审查的开源发布基线：
+
+1. 使用 Apache-2.0，增加 NOTICE、贡献指南、社区行为准则、私密漏洞报告策略、
+   Issue forms 和 PR 安全/证据清单；
+2. README 提供无需 API Key 的五分钟演示、真实性和数字人运行算力边界，并链接
+   可访问 SVG 架构图、路线图、API、Skill 与发布说明；
+3. Python production/dev 解析均精确到版本并保存 PyPI SHA-256，npm 保持
+   lockfile v3；Docker、start.sh 和 CI 实际消费 lock；
+4. Python、Node、Nginx 和 PostgreSQL/pgvector 镜像固定可读 tag 与多架构
+   manifest digest；GitHub Action 固定完整 commit SHA；
+5. CI 默认只有 `contents: read`，分别执行后端/迁移/release gate、Web 构建与
+   audit、真实 PostgreSQL/pgvector/API/Worker/Nginx Compose smoke；
+6. OpenAPI 从临时离线应用实例确定性生成，提交版本快照并在 CI 阻止漂移；
+7. release gate 自动检查版本、许可证、社区文件、hash lock、容器 digest、
+   Action SHA、README 边界、SVG 可访问性和 OpenAPI 一致性；
+8. ADR 0003 记录许可证、锁定、最小权限 CI 和不自动发布 tag 的取舍。
+
 当前离线 embedding 是可复现的 Unicode 特征哈希，不是高质量语义模型；回答
 生成器只复述证据，不做开放式模型归纳。`source_verified` 仍只表示内容能逐字
 定位回资料，并不证明资料陈述是客观事实。
@@ -663,8 +682,9 @@ TypeScript 检查与 Vite 生产构建通过；Python `59 passed`，Ruff 全量�
 Nginx 容器和 `docker compose config` 未执行；Compose 只通过 YAML、安全约束与
 交付资产自动化测试，不能把这些结果当作真实容器验收。
 
-唯一下一里程碑是 **M5：开源发布门槛**。补齐许可证、贡献与 Skill 开发指南、
-安全策略、稳定 API 文档、架构图、路线图、CI、发布说明和五分钟上手叙事。
+唯一下一里程碑是 **M6：可信本地账户与人物空间隔离**。把服务端固定
+`local-user` 升级为可信会话，让两个账户的人物、资料、记忆、检索、导出、任务
+和审计具备可自动证明的零越权边界，并提供 0.11 单所有者数据的显式迁移。
 
 ## 16. 调研依据
 

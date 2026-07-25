@@ -13,7 +13,7 @@ def test_web_dependencies_are_locked_and_build_is_reproducible() -> None:
         (WEB_ROOT / "package-lock.json").read_text(encoding="utf-8")
     )
 
-    assert package["version"] == "0.10.0"
+    assert package["version"] == "0.11.0"
     assert package["engines"]["node"] == ">=22.12"
     assert package["scripts"]["build"] == "tsc -b && vite build"
     assert package["scripts"]["test"] == "vitest run"
@@ -31,6 +31,7 @@ def test_web_container_is_unprivileged_and_proxies_same_origin_api() -> None:
     nginx = (WEB_ROOT / "nginx.conf").read_text(encoding="utf-8")
 
     assert "nginxinc/nginx-unprivileged:" in dockerfile
+    assert dockerfile.count("@sha256:") == 2
     assert "npm ci" in dockerfile
     assert "COPY --from=build --chown=101:101" in dockerfile
     assert "listen 8080;" in nginx

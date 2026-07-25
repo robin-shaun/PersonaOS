@@ -30,6 +30,7 @@ import {
   type NoticeTone,
   StatusPill,
 } from "./ui";
+import { MILESTONE, VERSION } from "./version";
 
 type Page =
   | "overview"
@@ -413,7 +414,9 @@ export default function App() {
               <small>{health?.runtime ?? "runtime unknown"}</small>
             </p>
           </div>
-          <p className="version">M4 · v0.10.0</p>
+          <p className="version">
+            {MILESTONE} · v{VERSION}
+          </p>
         </div>
       </aside>
 

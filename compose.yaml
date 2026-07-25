@@ -15,7 +15,7 @@ x-app-environment: &app-environment
 
 services:
   db:
-    image: pgvector/pgvector:0.8.5-pg17-bookworm
+    image: pgvector/pgvector:0.8.5-pg17-bookworm@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
     environment:
       POSTGRES_DB: personaos
       POSTGRES_USER: personaos
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   api:
-    image: personaos:0.10.0
+    image: personaos:0.11.0
     build:
       context: .
     environment: *app-environment
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: personaos:0.10.0
+    image: personaos:0.11.0
     build:
       context: .
     environment: *app-environment
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: personaos-web:0.10.0
+    image: personaos-web:0.11.0
     build:
       context: .
       dockerfile: apps/web/Dockerfile

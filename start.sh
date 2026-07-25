@@ -6,6 +6,8 @@ PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${PROJECT_DIR}/.venv"
 VENV_PYTHON="${VENV_DIR}/bin/python"
 SYSTEM_PYTHON="${PYTHON_BIN:-python3}"
+RUNTIME_LOCK="${PROJECT_DIR}/requirements.lock"
+LOCK_STAMP="${VENV_DIR}/.personaos-requirements.sha256"
 FORCE_INSTALL=0
 
 declare -a OWNED_PIDS=()
@@ -56,6 +58,8 @@ done
 
 cd -- "${PROJECT_DIR}"
 
+[[ -f "${RUNTIME_LOCK}" ]] || die "缺少依赖锁文件：${RUNTIME_LOCK}"
+
 if [[ ! -f "${PROJECT_DIR}/.env" ]]; then
     cp -- "${PROJECT_DIR}/.env.example" "${PROJECT_DIR}/.env"
     log "已从 .env.example 创建 .env"
@@ -97,9 +101,33 @@ from dotenv import load_dotenv
     FORCE_INSTALL=1
 fi
 
+LOCK_DIGEST="$("${VENV_PYTHON}" - "${RUNTIME_LOCK}" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import sys
+from pathlib import Path
+
+
+print(hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
+PY
+)"
+if [[ ! -f "${LOCK_STAMP}" ]] || [[ "$(<"${LOCK_STAMP}")" != "${LOCK_DIGEST}" ]]; then
+    FORCE_INSTALL=1
+fi
+
 if ((FORCE_INSTALL)); then
-    log "正在安装项目运行依赖"
-    "${VENV_PYTHON}" -m pip install -e "${PROJECT_DIR}"
+    log "正在按 requirements.lock 安装项目运行依赖"
+    "${VENV_PYTHON}" -m pip install \
+        --index-url https://pypi.org/simple \
+        --require-hashes \
+        -r "${RUNTIME_LOCK}"
+    "${VENV_PYTHON}" -m pip install \
+        --index-url https://pypi.org/simple \
+        --no-deps \
+        --no-build-isolation \
+        -e "${PROJECT_DIR}"
+    printf '%s\n' "${LOCK_DIGEST}" >"${LOCK_STAMP}"
 fi
 
 CONFIG_OUTPUT="$({

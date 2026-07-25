@@ -2,7 +2,7 @@
 
 ## 产品边界
 
-PersonaOS `0.10.0` 有两个相互隔离但复用同一运行底座的产品闭环：
+PersonaOS `0.11.0` 有两个相互隔离但复用同一运行底座的产品闭环：
 
 1. 人物资料闭环：创建 Persona，导入授权文本，生成有来源候选，由用户确认或
    拒绝，并仅用确认的当前版本完成混合检索与带引用问答；
@@ -11,6 +11,8 @@ PersonaOS `0.10.0` 有两个相互隔离但复用同一运行底座的产品闭�
 
 人物闭环不声称系统是现实中的本人；项目维护员工不自动修改 GitHub。React Web
 工作台覆盖人物闭环与任务/审计查看，但登录、多租户和模型驱动总结不属于本版本。
+
+![PersonaOS 本地优先证据架构](architecture.svg)
 
 ## 人物资料证据链
 
@@ -355,8 +357,25 @@ Runs 提交、状态与停止能力，再确认 API Server 没有启用任何 to
 每次 Skill 使用独立 session ID，当前不发送长期记忆 scope header。用户身份、
 任务和 task_run 只作为运行关联数据进入上下文，不授权 Hermes 代表用户行动。
 
+## 发布与供应链边界
+
+Python 依赖范围保留在 `pyproject.toml`，生产与开发解析分别写入带 SHA-256 的
+lock；Docker、start.sh 和 CI 都实际从 lock 安装。npm 使用精确直接依赖和
+lockfile v3。Python、Node、Nginx 与 PostgreSQL/pgvector 镜像保留可读 tag 并
+固定多架构 manifest digest。
+
+GitHub Actions 固定完整 commit SHA，workflow token 默认只有 `contents: read`。
+CI 的后端 job 验证 Ruff、Python 测试、SQLite migration、PostgreSQL offline
+SQL、OpenAPI、依赖审计和 release gate；Web job 验证 Vitest、TypeScript/Vite
+构建和 npm audit；Compose job 从空 volume 验证真实 PostgreSQL/pgvector、API、
+Worker 与 Nginx 同源证据闭环。
+
+这些措施降低构建漂移和常见供应链风险，但不构成上游代码证明、独立渗透测试或
+生产安全认证。完整取舍见
+[ADR 0003](adr/0003-reproducible-open-source-release.md)。
+
 ## 唯一下一里程碑
 
-M5 只补齐开源发布门槛：许可证、贡献与 Skill 开发指南、安全策略、稳定 API
-文档、架构图、路线图、CI、发布说明和五分钟上手叙事。身份认证和远程多租户
-不会伪装成 M5 已完成能力。
+M6 只交付可信本地账户与人物空间隔离：安全会话、服务端 actor、全领域账户
+归属、跨账户零召回/零读取/零修改、近期再认证和 0.11 单所有者迁移。它仍不会
+把本地认证伪装成互联网生产多租户能力。
