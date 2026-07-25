@@ -18,6 +18,8 @@ class Database:
             engine_options["connect_args"] = {"check_same_thread": False}
         if url in {"sqlite://", "sqlite:///:memory:"}:
             engine_options["poolclass"] = StaticPool
+        if not url.startswith("sqlite"):
+            engine_options["pool_pre_ping"] = True
 
         self.engine: Engine = create_engine(url, **engine_options)
         if url.startswith("sqlite"):

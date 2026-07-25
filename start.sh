@@ -11,7 +11,7 @@ FORCE_INSTALL=0
 declare -a OWNED_PIDS=()
 
 log() {
-    printf '[AI Colleague] %s\n' "$*" >&2
+    printf '[PersonaOS] %s\n' "$*" >&2
 }
 
 die() {
@@ -23,7 +23,7 @@ show_help() {
     cat <<'EOF'
 用法：./start.sh [--install]
 
-一键启动 AI Colleague API、Worker，以及 Hermes 模式所需的本地 gateway。
+一键启动 PersonaOS API、Worker，以及 Hermes 模式所需的本地 gateway。
 
 选项：
   --install  强制重新安装项目运行依赖
@@ -80,9 +80,13 @@ raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
 ' || die ".venv 中的 Python 版本低于 3.11，请删除 .venv 后重试"
 
 if ! "${VENV_PYTHON}" -c '
+import alembic
+import cryptography
 import fastapi
 import httpx
 import jwt
+import multipart
+import psycopg
 import pydantic
 import sqlalchemy
 import uvicorn

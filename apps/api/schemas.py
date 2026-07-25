@@ -139,3 +139,33 @@ class PreferenceReviewRequest(BaseModel):
         if self.expires_at is not None and self.action != "confirm":
             raise ValueError("expires_at is only valid when confirming a preference")
         return self
+
+
+class PersonaCreate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=10_000)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise ValueError("display_name must not be empty")
+        return normalized
+
+
+class PersonaMemoryReviewRequest(BaseModel):
+    action: Literal["confirm", "reject"]
+    edited_content: str | None = Field(default=None, max_length=20_000)
+    reason: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_review(self) -> PersonaMemoryReviewRequest:
+        if self.action == "reject" and self.edited_content is not None:
+            raise ValueError("edited_content is only valid when confirming")
+        if (
+            self.edited_content is not None
+            and not self.edited_content.strip()
+        ):
+            raise ValueError("edited_content must not be empty")
+        return self

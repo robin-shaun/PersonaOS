@@ -13,6 +13,7 @@ class EmployeeDefinition(BaseModel):
     role: str
     description: str = ""
     goals: list[str] = Field(default_factory=list)
+    allowed_permissions: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
     forbidden_actions: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
@@ -27,7 +28,7 @@ class EmployeeCatalog:
         self._definitions = {item.employee_id: item for item in definitions}
 
     @classmethod
-    def from_directory(cls, directory: Path) -> "EmployeeCatalog":
+    def from_directory(cls, directory: Path) -> EmployeeCatalog:
         definitions: list[EmployeeDefinition] = []
         for path in sorted(directory.glob("*.y*ml")):
             with path.open("r", encoding="utf-8") as stream:
@@ -44,4 +45,3 @@ class EmployeeCatalog:
 
     def all(self) -> list[EmployeeDefinition]:
         return list(self._definitions.values())
-

@@ -12,7 +12,6 @@ from core.services.project_maintenance import (
 )
 from core.storage.repository import ExecutionStore
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -27,9 +26,9 @@ class TaskWorker:
         retry_delay_seconds: float = 5.0,
         task_timeout_seconds: float = 300.0,
         control_poll_interval_seconds: float = 0.25,
+        task_handlers: dict[str, Any] | None = None,
     ) -> None:
         self._store = store
-        self._project_maintenance = project_maintenance
         self.worker_id = worker_id
         self.lease_seconds = max(5, lease_seconds)
         self.retry_delay_seconds = max(0.0, retry_delay_seconds)
@@ -37,6 +36,10 @@ class TaskWorker:
         self.control_poll_interval_seconds = max(
             0.01, control_poll_interval_seconds
         )
+        self._task_handlers = {
+            "daily-project-maintenance": project_maintenance,
+            **(task_handlers or {}),
+        }
 
     async def run_one(self) -> dict[str, Any] | None:
         job = self._store.claim_next_queue_job(
@@ -57,8 +60,13 @@ class TaskWorker:
                 await heartbeat
 
     async def _run_claimed_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        try:
+            task = self._store.get_task_for_execution(job["task_id"])
+            handler = self._task_handlers[str(task["workflow_name"])]
+        except Exception as exc:  # noqa: BLE001 - finalize every leased job
+            return self._finish_failure(job, exc)
         processing = asyncio.create_task(
-            self._project_maintenance.run_task(job["task_id"])
+            handler.run_task(job["task_id"])
         )
         deadline = asyncio.get_running_loop().time() + self.task_timeout_seconds
         try:
@@ -93,7 +101,7 @@ class TaskWorker:
                 if self._store.is_task_cancellation_requested(job["task_id"]):
                     return self._finish_cancellation(job)
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - worker failure boundary
                 if self._store.is_task_cancellation_requested(job["task_id"]):
                     return self._finish_cancellation(job)
                 return self._finish_failure(job, exc)

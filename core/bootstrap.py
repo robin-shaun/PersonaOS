@@ -12,15 +12,22 @@ from core.agents.employee import EmployeeCatalog
 from core.agents.runtime import AgentRuntime
 from core.config import Settings
 from core.evaluation.task_eval import ProjectMaintenanceEvaluator
+from core.ingestion.chunking import DeterministicTextChunker
+from core.ingestion.extractor import RulesMemoryCandidateExtractor
+from core.security.access import AccessContext
 from core.services.github_connections import GitHubConnectionService
+from core.services.knowledge_ingestion import KnowledgeIngestionService
 from core.services.personalization import PersonalizationService
+from core.services.personas import PersonaService
 from core.services.project_maintenance import (
     ApprovalService,
     ProjectMaintenanceService,
 )
 from core.skills.executor import SkillExecutor
 from core.skills.registry import SkillRegistry
+from core.storage.blob import EncryptedLocalBlobStore, decode_blob_key
 from core.storage.database import Database
+from core.storage.persona_repository import PersonaRepository
 from core.storage.repository import ExecutionStore
 from core.workflows.models import WorkflowCatalog
 
@@ -36,8 +43,12 @@ class Container:
     runtime: AgentRuntime
     github_connections: GitHubConnectionService
     personalization: PersonalizationService
+    persona_access: AccessContext
+    personas: PersonaService
+    knowledge_ingestion: KnowledgeIngestionService
     project_maintenance: ProjectMaintenanceService
     approvals: ApprovalService
+    task_handlers: dict[str, object]
 
 
 def build_container(
@@ -56,7 +67,8 @@ def build_container(
     workflows = WorkflowCatalog.from_directory(settings.workflow_config_dir)
 
     database = database or Database(settings.database_url)
-    database.create_schema()
+    if settings.database_auto_create_schema:
+        database.create_schema()
     store = ExecutionStore(database)
     store.seed_definitions(
         employees=employees.all(),
@@ -108,6 +120,40 @@ def build_container(
         provider=github_app,
     )
     personalization = PersonalizationService(store)
+    persona_repository = PersonaRepository(database)
+    blob_store = EncryptedLocalBlobStore(
+        root=(
+            settings.persona_blob_dir
+            or settings.base_dir / "var" / "persona_blobs"
+        ),
+        key=(
+            decode_blob_key(settings.persona_blob_key)
+            if settings.persona_blob_key
+            else None
+        ),
+        key_path=(
+            settings.persona_blob_key_path
+            or settings.base_dir / "var" / "persona_blob.key"
+        ),
+    )
+    persona_access = AccessContext(
+        owner_id=settings.persona_local_owner_id,
+        actor_id=settings.persona_local_owner_id,
+    )
+    personas = PersonaService(
+        repository=persona_repository,
+        execution_store=store,
+        blob_store=blob_store,
+        max_upload_bytes=settings.persona_max_upload_bytes,
+    )
+    knowledge_ingestion = KnowledgeIngestionService(
+        store=store,
+        personas=persona_repository,
+        workflows=workflows,
+        blob_store=blob_store,
+        chunker=DeterministicTextChunker(),
+        extractor=RulesMemoryCandidateExtractor(),
+    )
     skill_executor = SkillExecutor(skill_registry, runtime)
     project_maintenance = ProjectMaintenanceService(
         store=store,
@@ -130,6 +176,13 @@ def build_container(
         runtime=runtime,
         github_connections=github_connections,
         personalization=personalization,
+        persona_access=persona_access,
+        personas=personas,
+        knowledge_ingestion=knowledge_ingestion,
         project_maintenance=project_maintenance,
         approvals=ApprovalService(store, personalization),
+        task_handlers={
+            "daily-project-maintenance": project_maintenance,
+            "persona-text-ingestion": knowledge_ingestion,
+        },
     )

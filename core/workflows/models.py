@@ -31,7 +31,7 @@ class WorkflowCatalog:
         self._definitions = {item.name: item for item in definitions}
 
     @classmethod
-    def from_directory(cls, directory: Path) -> "WorkflowCatalog":
+    def from_directory(cls, directory: Path) -> WorkflowCatalog:
         definitions: list[WorkflowDefinition] = []
         for path in sorted(directory.glob("*.y*ml")):
             with path.open("r", encoding="utf-8") as stream:
@@ -48,4 +48,3 @@ class WorkflowCatalog:
 
     def all(self) -> list[WorkflowDefinition]:
         return list(self._definitions.values())
-

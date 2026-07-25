@@ -1,12 +1,28 @@
 name: issue-triage
-version: 1.0.0
+version: 1.1.0
 description: 对开放 Issue 进行可解释的优先级排序，不执行任何 GitHub 写操作。
+
+input_schema:
+  repository_snapshot: object
 
 inputs:
   - repository_snapshot
 
+required_permissions:
+  - github.repository.read
+
 required_tools:
   - github_repository_reader
+
+timeout_seconds: 60
+risk_level: low
+requires_confirmation: true
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 0.5
+  retry_on:
+    - transient_runtime_error
 
 steps:
   - normalize_labels
@@ -26,3 +42,17 @@ evaluation:
   - rationale_coverage
   - deterministic_ordering
 
+tests:
+  - name: deterministic_issue_order
+    input_fixture: github_repository_snapshot
+    assertions:
+      - every_issue_exists_in_snapshot
+      - replay_preserves_order
+
+examples:
+  - description: 对开放 Issue 给出只读排序建议
+    input:
+      repository_snapshot:
+        repository: owner/repository
+
+dependencies: []

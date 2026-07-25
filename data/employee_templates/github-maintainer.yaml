@@ -10,6 +10,9 @@ goals:
   - 让 Issue 优先级建议具备可追溯证据
   - 从用户的接受、修改和拒绝中积累偏好证据
 
+allowed_permissions:
+  - github.repository.read
+
 allowed_tools:
   - github_repository_reader
 
@@ -33,4 +36,3 @@ approval_policy:
   read_repository: automatic
   deliver_recommendation: required
   mutate_github: forbidden
-

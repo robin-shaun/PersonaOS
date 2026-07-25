@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -142,4 +142,3 @@ class WorkflowEngine:
                 return False
             value = value[part]
         return value == condition.equals
-

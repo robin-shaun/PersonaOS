@@ -1,0 +1,5 @@
+PersonaOS database migrations.
+
+Create revisions with `alembic revision --autogenerate -m "description"` and
+review every generated operation before committing. CI should run
+`alembic upgrade head` followed by `alembic check`.

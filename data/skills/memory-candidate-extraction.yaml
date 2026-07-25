@@ -1,0 +1,60 @@
+name: memory-candidate-extraction
+version: 1.0.0
+description: 从文本块复制可验证内容，生成带来源且必须人工审核的记忆候选。
+
+input_schema:
+  document_chunks: array
+
+inputs:
+  - document_chunks
+
+required_permissions:
+  - persona.chunk.read
+  - persona.memory_candidate.write
+
+required_tools: []
+
+timeout_seconds: 30
+risk_level: medium
+requires_confirmation: false
+
+retry_policy:
+  max_attempts: 1
+  backoff_seconds: 0
+  retry_on: []
+
+steps:
+  - classify_memory_type
+  - preserve_source_wording
+  - attach_chunk_evidence
+  - mark_epistemic_status
+
+output_schema:
+  document_id: string
+  candidate_count: integer
+  extractor: string
+  model_inferences_created: integer
+
+evaluation:
+  - every_candidate_has_evidence
+  - no_automatic_confirmation
+  - no_unmarked_inference
+
+tests:
+  - name: evidence_bound_candidate
+    input_fixture: deterministic_document_chunks
+    assertions:
+      - every_candidate_has_chunk_evidence
+      - every_candidate_starts_unconfirmed
+      - replay_is_idempotent
+
+examples:
+  - description: 从演示日记分块生成待审核候选
+    input:
+      document_chunks:
+        - ordinal: 0
+          locator:
+            kind: text_range
+
+dependencies:
+  - source-chunk-rules@1.0.0

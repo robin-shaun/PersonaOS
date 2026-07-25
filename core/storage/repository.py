@@ -677,7 +677,7 @@ class ExecutionStore:
             now = utc_now()
             lease_expires_at = now + timedelta(seconds=lease_seconds)
             with self.database.session() as session:
-                job = session.scalar(
+                statement = (
                     select(QueueJobRecord)
                     .where(
                         or_(
@@ -699,6 +699,12 @@ class ExecutionStore:
                     )
                     .limit(1)
                 )
+                if (
+                    session.bind is not None
+                    and session.bind.dialect.name != "sqlite"
+                ):
+                    statement = statement.with_for_update(skip_locked=True)
+                job = session.scalar(statement)
                 if job is None:
                     return None
 
@@ -1330,6 +1336,35 @@ class ExecutionStore:
             task.status = "awaiting_approval"
             run.status = "awaiting_approval"
             run.output = output
+            return True
+
+    def mark_execution_completed(
+        self,
+        *,
+        task_id: str,
+        task_run_id: str,
+        workflow_run_id: str,
+        output: dict[str, Any],
+    ) -> bool:
+        finished_at = utc_now()
+        with self.database.session() as session:
+            task = self._required(session, TaskRecord, task_id)
+            run = self._required(session, TaskRunRecord, task_run_id)
+            workflow_run = self._required(
+                session, WorkflowRunRecord, workflow_run_id
+            )
+            if task.status == "cancelling":
+                return False
+            task.status = "completed"
+            task.final_output = output
+            task.updated_at = finished_at
+            run.status = "completed"
+            run.output = output
+            run.finished_at = finished_at
+            run.latency_ms = _elapsed_ms(run.started_at, finished_at)
+            workflow_run.status = "completed"
+            workflow_run.current_step = None
+            workflow_run.updated_at = finished_at
             return True
 
     def mark_execution_failed(

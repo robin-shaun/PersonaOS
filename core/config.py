@@ -32,9 +32,15 @@ class Settings:
     worker_retry_delay_seconds: float = 5.0
     worker_task_timeout_seconds: float = 300.0
     worker_control_poll_seconds: float = 0.25
+    database_auto_create_schema: bool = True
+    persona_local_owner_id: str = "local-user"
+    persona_blob_dir: Path | None = None
+    persona_blob_key: str | None = field(default=None, repr=False)
+    persona_blob_key_path: Path | None = field(default=None, repr=False)
+    persona_max_upload_bytes: int = 5 * 1024 * 1024
 
     @classmethod
-    def from_env(cls, base_dir: Path | None = None) -> "Settings":
+    def from_env(cls, base_dir: Path | None = None) -> Settings:
         project_root = (base_dir or Path(__file__).resolve().parents[1]).resolve()
         default_db = f"sqlite:///{project_root / 'var' / 'digital_employee.db'}"
         configured_db = os.getenv("DIGITAL_EMPLOYEE_DATABASE_URL") or default_db
@@ -43,6 +49,20 @@ class Settings:
         if bool(github_app_id) != bool(github_app_private_key):
             raise ValueError(
                 "GITHUB_APP_ID and a GitHub App private key must be configured together"
+            )
+        persona_owner_id = (
+            os.getenv("PERSONA_LOCAL_OWNER_ID") or "local-user"
+        ).strip()
+        if not persona_owner_id:
+            raise ValueError("PERSONA_LOCAL_OWNER_ID must not be empty")
+        persona_blob_key = (os.getenv("PERSONA_BLOB_KEY") or "").strip() or None
+        persona_blob_key_path = _configured_path(
+            project_root,
+            os.getenv("PERSONA_BLOB_KEY_PATH"),
+        )
+        if persona_blob_key and persona_blob_key_path:
+            raise ValueError(
+                "Configure only one of PERSONA_BLOB_KEY or PERSONA_BLOB_KEY_PATH"
             )
         return cls(
             base_dir=project_root,
@@ -122,6 +142,23 @@ class Settings:
                 default=0.25,
                 minimum=0.01,
             ),
+            database_auto_create_schema=_env_bool(
+                "DIGITAL_EMPLOYEE_AUTO_CREATE_SCHEMA",
+                default=True,
+            ),
+            persona_local_owner_id=persona_owner_id,
+            persona_blob_dir=_configured_path(
+                project_root,
+                os.getenv("PERSONA_BLOB_DIR"),
+            ),
+            persona_blob_key=persona_blob_key,
+            persona_blob_key_path=persona_blob_key_path,
+            persona_max_upload_bytes=_env_int(
+                "PERSONA_MAX_UPLOAD_BYTES",
+                default=5 * 1024 * 1024,
+                minimum=1,
+                maximum=100 * 1024 * 1024,
+            ),
         )
 
     @property
@@ -151,6 +188,16 @@ def _github_app_private_key(project_root: Path) -> str | None:
         return path.read_text(encoding="utf-8").strip() or None
     except OSError as exc:
         raise ValueError(f"Unable to read GITHUB_APP_PRIVATE_KEY_PATH: {path}") from exc
+
+
+def _configured_path(project_root: Path, raw_value: str | None) -> Path | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    return path.resolve()
 
 
 def _env_int(
@@ -184,3 +231,15 @@ def _env_float(
     if value < minimum:
         raise ValueError(f"{name} must be at least {minimum}")
     return value
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")

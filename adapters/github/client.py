@@ -78,7 +78,7 @@ class HttpGitHubGateway:
         self._headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": api_version,
-            "User-Agent": "digital-employee-mvp/0.6",
+            "User-Agent": "personaos/0.7",
         }
         if token:
             self._headers["Authorization"] = f"Bearer {token}"

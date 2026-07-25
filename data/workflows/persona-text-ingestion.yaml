@@ -1,0 +1,17 @@
+name: persona-text-ingestion
+version: 1.0.0
+description: 读取加密原文、确定性切分、生成候选并保存证据，不自动确认记忆。
+
+steps:
+  - id: read_source
+    uses: tool.local_encrypted_blob_reader
+    retries: 1
+
+  - id: split_text
+    uses: ingestion.deterministic_text_chunker
+
+  - id: extract_candidates
+    uses: memory.rules_candidate_extractor
+
+  - id: persist_candidates
+    uses: memory.persist_candidates

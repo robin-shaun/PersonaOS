@@ -1,0 +1,77 @@
+name: personaos
+
+x-app-environment: &app-environment
+  DIGITAL_EMPLOYEE_DATABASE_URL: >-
+    postgresql+psycopg://personaos:${POSTGRES_PASSWORD:-personaos-local-dev}@db:5432/personaos
+  DIGITAL_EMPLOYEE_AUTO_CREATE_SCHEMA: "false"
+  DIGITAL_EMPLOYEE_RUNTIME: rules
+  DIGITAL_EMPLOYEE_API_HOST: 0.0.0.0
+  DIGITAL_EMPLOYEE_API_PORT: "18110"
+  PERSONA_LOCAL_OWNER_ID: local-user
+  PERSONA_BLOB_DIR: /app/var/persona/blobs
+  PERSONA_BLOB_KEY_PATH: /app/var/persona/blob.key
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.5-pg17-bookworm
+    environment:
+      POSTGRES_DB: personaos
+      POSTGRES_USER: personaos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-personaos-local-dev}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - personaos-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U personaos -d personaos"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    image: personaos:0.7.0
+    build:
+      context: .
+    environment: *app-environment
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        alembic upgrade head
+        exec python -m apps.api
+    ports:
+      - "127.0.0.1:18110:18110"
+    volumes:
+      - personaos-private:/app/var
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen("http://127.0.0.1:18110/health", timeout=2).read()
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    image: personaos:0.7.0
+    build:
+      context: .
+    environment: *app-environment
+    command: ["python", "-m", "apps.worker.run"]
+    volumes:
+      - personaos-private:/app/var
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  personaos-postgres:
+  personaos-private:

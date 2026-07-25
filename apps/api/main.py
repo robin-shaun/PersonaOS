@@ -1,8 +1,18 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import replace
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request, status
+from fastapi import (
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse
 
 from adapters.github.client import GitHubAdapterError
@@ -11,6 +21,8 @@ from apps.api.schemas import (
     ApprovalDecisionRequest,
     FeedbackCreate,
     GitHubConnectionCreate,
+    PersonaCreate,
+    PersonaMemoryReviewRequest,
     PreferenceReviewRequest,
     ProjectMaintenanceTaskCreate,
     TaskCancellationRequest,
@@ -27,14 +39,28 @@ from core.services.project_maintenance import (
 def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
-        title="Digital Employee MVP",
-        version="0.6.0",
+        title="PersonaOS",
+        version="0.7.0",
         description=(
-            "Approval-first, read-only GitHub project maintenance employee. "
-            "Every result includes evidence and an execution trace."
+            "Evidence-driven digital employee and review-first persona memory. "
+            "Every long-term memory remains traceable to authorized source text."
         ),
     )
     app.state.container = container
+
+    def persona_access(request: Request):
+        request_id = (request.headers.get("X-Request-ID") or "").strip()
+        if len(request_id) > 100 or any(
+            character in request_id for character in "\r\n\t"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="X-Request-ID is invalid",
+            )
+        return replace(
+            container.persona_access,
+            request_id=request_id or None,
+        )
 
     @app.exception_handler(TaskExecutionFailed)
     async def task_failed_handler(
@@ -66,7 +92,221 @@ def create_app(container: Container | None = None) -> FastAPI:
             "api_port": container.settings.api_port,
             "task_timeout_seconds": container.settings.worker_task_timeout_seconds,
             "queue": container.store.queue_summary(),
+            "persona_identity_mode": "local_single_owner",
+            "persona_blob_encryption": "AES-256-GCM",
         }
+
+    @app.post(
+        "/api/v1/personas",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_persona(
+        payload: PersonaCreate,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.create(
+                persona_access(request),
+                display_name=payload.display_name,
+                description=payload.description,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/personas")
+    async def list_personas(
+        request: Request,
+        include_inactive: bool = False,
+    ) -> list[dict[str, Any]]:
+        return container.personas.list(
+            persona_access(request),
+            include_inactive=include_inactive,
+        )
+
+    @app.get("/api/v1/personas/{persona_id}")
+    async def get_persona(
+        persona_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.get(
+                persona_access(request),
+                persona_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/personas/{persona_id}/documents",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def upload_persona_document(
+        persona_id: str,
+        request: Request,
+        file: Annotated[UploadFile, File()],
+        language: str | None = Query(default=None, max_length=40),
+    ) -> dict[str, Any]:
+        try:
+            content = await file.read(
+                container.settings.persona_max_upload_bytes + 1
+            )
+            return container.personas.upload_text(
+                persona_access(request),
+                persona_id=persona_id,
+                filename=file.filename or "",
+                media_type=file.content_type,
+                content=content,
+                language=language,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        finally:
+            await file.close()
+
+    @app.get("/api/v1/personas/{persona_id}/documents")
+    async def list_persona_documents(
+        persona_id: str,
+        request: Request,
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.personas.list_documents(
+                persona_access(request),
+                persona_id=persona_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/documents/{document_id}")
+    async def get_persona_document(
+        document_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.get_document(
+                persona_access(request),
+                document_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/personas/{persona_id}/memory-candidates")
+    async def list_persona_memory_candidates(
+        persona_id: str,
+        request: Request,
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.personas.list_memories(
+                persona_access(request),
+                persona_id=persona_id,
+                status="candidate",
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/personas/{persona_id}/memories")
+    async def list_persona_memories(
+        persona_id: str,
+        request: Request,
+        memory_status: str = Query(default="confirmed", alias="status"),
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.personas.list_memories(
+                persona_access(request),
+                persona_id=persona_id,
+                status=memory_status,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/memories/{memory_id}")
+    async def get_persona_memory(
+        memory_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.get_memory(
+                persona_access(request),
+                memory_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post("/api/v1/memory-candidates/{memory_id}/review")
+    async def review_persona_memory(
+        memory_id: str,
+        payload: PersonaMemoryReviewRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.review_memory(
+                persona_access(request),
+                memory_id,
+                action=payload.action,
+                edited_content=payload.edited_content,
+                reason=payload.reason,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/personas/{persona_id}/audit-events")
+    async def list_persona_audit_events(
+        persona_id: str,
+        request: Request,
+        limit: int = Query(default=200, ge=1, le=500),
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.personas.list_audit_events(
+                persona_access(request),
+                persona_id=persona_id,
+                limit=limit,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
 
     @app.get("/api/v1/employees")
     async def list_employees() -> list[dict[str, Any]]:

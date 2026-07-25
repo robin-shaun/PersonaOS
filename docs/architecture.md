@@ -2,17 +2,53 @@
 
 ## 产品边界
 
-第一个岗位是开源项目维护员工。它只解决三个问题：
+PersonaOS `0.7.0` 有两个相互隔离但复用同一运行底座的产品闭环：
 
-1. 把仓库、开放 Issue 和开放 PR 汇总成每日工作简报；
-2. 给开放 Issue 提供可解释、可追溯的优先级建议；
-3. 记录用户接受、修改或拒绝建议时留下的行为证据。
+1. 人物资料闭环：创建 Persona，导入授权文本，生成有来源候选，由用户确认或
+   拒绝，并保留不可变版本和审计；
+2. 项目维护员工：汇总 GitHub 仓库、开放 Issue 和 PR，给出可追溯建议，记录
+   用户审批形成的行为证据。
 
-“自动修改 GitHub”和“模拟某个人”不属于当前版本。
+当前人物闭环不做检索问答，也不声称系统是现实中的本人；项目维护员工不自动
+修改 GitHub。Web UI、登录、多租户、记忆删除和模型驱动总结不属于本版本。
+
+## 人物资料证据链
+
+    FastAPI（固定本地 owner）
+              │
+              ├── PersonaService ── 文件白名单、大小和 UTF-8 校验
+              │         │
+              │         ├── EncryptedLocalBlobStore ── AES-256-GCM 原文
+              │         └── SourceDocument + queued Task
+              │
+              ▼
+    TaskWorker ── KnowledgeIngestionService
+              │
+              ├── deterministic chunker
+              ├── rules candidate extractor
+              └── PersonaRepository
+                        ├── DocumentChunk（稳定定位）
+                        ├── PersonaMemory（审核状态）
+                        ├── MemoryVersion（不可变正文）
+                        ├── MemoryEvidence（来源快照）
+                        └── AuditEvent（不保存原始正文）
+
+原文只在 BlobStore 解密后进入 Worker 当前协程的临时工作字典。Workflow
+checkpoint、task input、tool call 和错误记录只保存哈希、大小、ID 与计数，不
+保存原文。候选初始版本标记 `user_confirmed=false`；确认总是派生一个新版本，
+复制来源证据并标记人工确认，原版本不被覆盖。
+
+`AccessContext` 来自服务端配置而不是请求参数。M1 只有一个本地 owner，这是一条
+明确的部署限制，不等价于认证系统。所有人物、资料和记忆查询仍在 repository
+边界重复执行 owner 过滤，为以后替换成登录会话保留接口。
+
+原始 Blob 已应用层加密，但 chunk、候选和证据摘录为后续检索保存在数据库可读
+字段，因此仍要求磁盘/volume 加密。`source_verified` 表示可定位回授权资料，
+不表示内容已经由外部事实核验。
 
 ## 模块关系
 
-    API ──入队──▶ SQLite Queue ◀──领取/续租── Worker
+    API ──入队──▶ SQL Queue ◀──领取/续租── Worker
                                              │
                                              ▼
     ProjectMaintenanceService
@@ -43,6 +79,11 @@ API 只负责校验并创建 `pending` 任务，不在 HTTP 请求内访问 GitH
 或 `cancelled`。
 Worker 原子领取作业后定期续租；进程在完成前退出时，租约到期的作业可以由
 其他 Worker 回收，旧的运行轨迹会标记为失败并保留。
+
+轻量主机开发使用 SQLite；Compose 使用 PostgreSQL，并在领取查询中使用
+`FOR UPDATE SKIP LOCKED`。两者都保留后续的条件更新作为租约所有权保护。
+Compose 启动 API 前执行 Alembic，应用进程关闭自动建表；`start.sh` 暂时保留
+自动建表以兼容现有未版本化 SQLite 数据库。
 
 同一用户可以通过 `Idempotency-Key` 安全重试创建请求。相同键和相同输入返回
 原任务；相同键配不同输入会返回冲突。Worker 自动重试耗尽后，任务保持
@@ -154,6 +195,16 @@ AgentRuntime 或业务 Workflow 的调用边界。
 
 ## 安全约束
 
+- 人物 API 使用服务端固定 owner，Compose 只映射到 `127.0.0.1`；未实现认证前
+  不允许暴露到不可信网络。
+- 原始资料只接受限定大小的 UTF-8 `.txt`/`.md`，按 SHA-256 寻址并用
+  AES-256-GCM 加密；密钥来自环境、密钥文件或首次启动生成的 0600 文件。
+- Blob object key 有固定格式和根目录约束，读取时同时验证 AEAD tag 与内容哈希。
+- 候选永不自动确认；确认总是产生新的人工版本，拒绝候选不进入长期记忆。
+- 人物 AuditEvent 只保存状态、哈希、计数和错误类型，不保存原始正文。
+- Skill 合约声明权限、工具、超时、重试、风险和确认元数据；SkillExecutor 对
+  模型 Skill 强制检查岗位工具/权限并执行超时。第三方 Skill 的安装、启停、
+  版本升级和进程级隔离尚未实现，当前只允许仓库内受信代码。
 - GitHub 适配器只实现 GET。
 - GitHub App installation token 限制到单仓库和只读权限，且不持久化。
 - Employee Definition 明确列出 allowed_tools 和 forbidden_actions。
@@ -183,11 +234,9 @@ Runs 提交、状态与停止能力，再确认 API Server 没有启用任何 to
 每次 Skill 使用独立 session ID，当前不发送长期记忆 scope header。用户身份、
 任务和 task_run 只作为运行关联数据进入上下文，不授权 Hermes 代表用户行动。
 
-## 下一批技术任务
+## 唯一下一里程碑
 
-1. 增加网页管理端，覆盖仓库连接、任务轨迹、审批、偏好审核和运行时状态；
-2. 增加 PostgreSQL、数据库迁移、登录和可信租户隔离；
-3. 增加相似偏好的语义合并、冲突检测和证据衰减，替代当前精确规则聚合；
-4. 增加 Identity Profile、情景记忆检索和由用户确认的语义记忆归纳；
-5. 增加组织 Skill Override 与个人 Skill Override 的版本化组合；
-6. 增加 GitHub App 安装回调和 webhook 驱动的自动连接同步。
+M2 只实现 confirmed 当前版本的混合检索与带引用问答：登记 embedding space，
+禁止跨空间混用，结合 PostgreSQL 词法检索与向量召回，并在回答落库前验证每个
+citation 都能解析到当前 MemoryVersion、DocumentChunk 和 SourceDocument。
+证据不足必须返回明确的无记忆结果。登录、Web UI、删除和冲突图仍不混入 M2。

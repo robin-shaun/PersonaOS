@@ -1,9 +1,15 @@
 # PersonaOS 数字分身 MVP 实施方案
 
-- 状态：已评审的实施基线
+- 状态：已评审的实施基线；M1 已实现
 - 日期：2026-07-25
 - 仓库基线：`37daaa3` (`main`)
 - 适用范围：第一阶段“数字员工”向第二阶段“证据驱动的数字分身”演进
+
+> 实施进展（2026-07-25）：仓库版本已进入 `0.7.0`。M1 的人物创建、加密文本
+> 导入、确定性分块、来源绑定候选、人工确认/拒绝、不可变确认版本和统一审计
+> 已落地。为满足本地可运行验收，PostgreSQL/pgvector、API、Worker 的 Compose
+> 基线也提前交付；它不包含 M4 的 React Web UI。第 2–4 节仍保留审计当时的
+> `0.6.0` 事实快照，避免用后来实现篡改基线。
 
 ## 1. 结论
 
@@ -574,20 +580,31 @@ CI、依赖锁定和发布说明。README 在五分钟内演示完整闭环，�
 每个里程碑独立可运行、可测试、可演示。不得为了后续里程碑提前创建没有行为的
 空目录或大量 TODO。
 
-## 15. 唯一下一里程碑
+## 15. M1 实施结果与唯一下一里程碑
 
-下一轮只实施 **M1：人物资料到记忆确认的证据入口闭环**。
+M1 已按以下边界落地：
 
-M1 的完成定义：
+1. Persona 归属于服务端配置的本地 principal，而不是请求方伪造的用户 ID；
+2. `.txt`/`.md` 原文按 SHA-256 内容寻址，并以 AES-256-GCM 保存到本地 Blob；
+3. chunk 保留字符偏移、行号、内容哈希和 chunker 配置哈希；
+4. 每个规则候选绑定 document、chunk、locator、excerpt 和不可变版本；
+5. 确认无论是否修订内容，都会新建 `user_confirmed=true` 的 MemoryVersion；
+6. 上传、处理和 Worker 重放幂等，重要状态变化进入统一 AuditEvent；
+7. Alembic 基线与 PostgreSQL/pgvector Compose 已加入，SQLite 保留兼容测试；
+8. 原始正文不进入 task/workflow/tool trace，候选不会被自动确认。
 
-1. 用户能通过 API 创建一个归属于本地 principal 的 Persona；
-2. 能上传至少一份 `.txt`/`.md`，原文以内容哈希存储并产生稳定 chunks；
-3. 每条记忆候选都能展开到 document、chunk、行号/字符偏移和 excerpt；
-4. 用户确认后生成不可覆盖的 MemoryVersion，拒绝候选不会进入长期记忆；
-5. 创建、上传、处理、确认和拒绝均有统一 AuditEvent；
-6. 重复上传和 Worker 重试不产生重复文档、chunks 或候选；
-7. 现有 34 项测试继续通过，并新增完整 API/领域测试；
-8. PostgreSQL migration 可从空库升级；SQLite 仅保留测试和轻量开发兼容。
+当前实现有意没有加入 embedding、检索、聊天或模型总结。规则提取器中的
+`source_verified` 只表示内容能逐字定位回资料，并不证明资料陈述是客观事实。
+
+本轮验证结果为：`43 passed`；Ruff 静态检查通过；SQLite 基线 migration 完成
+upgrade/check/downgrade/upgrade 往返；PostgreSQL 离线 migration SQL 可编译；
+真实 API 与 Worker 进程完成演示资料导入和人工确认。执行环境没有 Docker，
+因此 Compose 只完成 YAML/安全约束自动化测试，尚未在本机实际拉取镜像启动。
+
+唯一下一里程碑是 **M2：确认记忆的混合检索与带引用问答**。只允许 confirmed
+当前版本进入索引；检索必须先按 owner/persona 过滤，再合并词法与向量结果；
+回答中的每个 citation 都必须解析到 MemoryVersion、chunk 和原文件定位，证据
+不足时返回明确的无记忆结果。
 
 ## 16. 调研依据
 

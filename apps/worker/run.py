@@ -70,6 +70,7 @@ async def run() -> None:
         retry_delay_seconds=args.retry_delay,
         task_timeout_seconds=args.task_timeout,
         control_poll_interval_seconds=args.control_poll,
+        task_handlers=container.task_handlers,
     )
     if args.once:
         result = await worker.run_one()

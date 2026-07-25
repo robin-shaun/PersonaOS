@@ -1,20 +1,33 @@
-# Digital Employee MVP
+# PersonaOS
 
-一个“证据驱动、人工审批优先”的开源项目维护数字员工。
+一个本地优先、证据驱动、人工审核优先的开源数字员工与数字分身系统。
 
-当前版本只读取 GitHub 公共或已授权仓库，生成项目工作简报与 Issue
-优先级建议。系统不会修改 Issue、回复评论、合并 PR 或发布 Release。
-所有建议在交付前都会暂停，等待用户接受、修改或拒绝；这些选择会被
-保存为以后构建个人偏好和数字分身的数据证据。
+PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选、人工确认版本和
+原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.7.0` 是
+M1：已经跑通“创建人物 → 导入文本 → 确定性切分 → 生成候选 → 人工确认/拒绝
+→ 查看证据和审计”的纵向闭环；检索问答与 Web 管理端仍在后续里程碑。
+
+仓库也保留原有的 GitHub 项目维护数字员工：它只读取公共或已授权仓库，生成
+项目简报与 Issue 优先级建议，不修改 Issue、评论、PR 或 Release。建议必须
+经过人工审批，用户选择会成为可审核的偏好证据。
 
 ## 产品形态
 
-产品采用网页端优先：浏览器负责连接仓库、发起任务、查看轨迹和处理审批；API、
-Worker 与 Hermes 都运行在服务端，模型密钥不会下发到浏览器。当前仓库已完成
-后端 API 和 Worker，现阶段可通过 `/docs` 操作；专用管理网页是下一阶段界面。
-以后如需桌面客户端，可以在同一 API 上增加桌面壳，不需要改变 Agent 底座。
+产品采用 Web/API 优先：API、Worker 与可选模型网关运行在服务端，密钥不会
+下发到浏览器。当前通过 FastAPI `/docs` 操作；专用 React 管理端尚未实现。
+核心采用模块化单体和可替换适配器，避免把记忆语义锁进某个 Agent 框架。
 
-## 已实现的闭环
+## 已实现的两个闭环
+
+    授权 UTF-8 文本 / Markdown
+              ↓ AES-256-GCM 原始 Blob
+       可复现分块 + 来源定位
+              ↓
+       有来源的记忆候选
+              ↓ 人工确认 / 修订 / 拒绝
+     不可变 MemoryVersion + Evidence
+              ↓
+       统一 AuditEvent
 
     GitHub 只读快照
           ↓
@@ -28,25 +41,41 @@ Worker 与 Hermes 都运行在服务端，模型密钥不会下发到浏览器�
           ↓
     产物、修改、反馈与决策记录
 
-当前 0.6.0 版本已集成 Hermes Agent API Server，也保留确定性的 `rules-v1`
-作为默认离线运行时。业务层只依赖 `AgentRuntime`，切换 Hermes 不需要重写
-Skill、Workflow、审批或持久化代码。
+模型运行时保留确定性的 `rules-v1` 作为免费、离线默认，也可通过隔离适配器接入
+Hermes Agent API。业务层只依赖 `AgentRuntime`；人物资料 M1 本身不调用模型，
+规则提取器只把原文片段变成待审核候选，不会自动确认或编造新事实。
 
-0.6.0 同时加入了第一段 Personal Layer：系统会把用户修改、拒绝和显式反馈
-保存为带来源的行为证据，并生成待用户审核的候选偏好。候选偏好不会影响任务；
-只有用户主动确认且尚未过期的偏好，才会以独立上下文叠加到公共岗位 Skill 上。
-公共 Skill 和组织规则不会因个人反馈而被直接改写。
+Personal Layer 还会把用户对数字员工输出的修改、拒绝和显式反馈保存为来源证据，
+生成待审核偏好。只有用户主动确认且未过期的偏好才会进入后续任务上下文。
 
 ## 快速启动
 
 需要 Python 3.11 或更高版本。
+
+最完整的本地基线使用 Docker Compose，启动 PostgreSQL/pgvector、API 和 Worker：
+
+~~~bash
+docker compose up --build
+~~~
+
+打开 http://127.0.0.1:18110/docs。API 只映射到本机回环地址；Compose 会先执行
+Alembic migration，并让 API 与 Worker 共享加密 Blob 密钥卷。停止服务：
+
+~~~bash
+docker compose down
+~~~
+
+不删除 named volumes 就会保留数据库、原始资料密文和密钥。`docker compose
+down -v` 会永久删除这些本地数据，不应用作普通停止命令。
+
+也可以使用向后兼容的轻量主机启动方式（SQLite）：
 
 ~~~bash
 ./start.sh
 ~~~
 
 第一次运行会自动创建 `.env` 和 `.venv`、安装运行依赖，然后在同一终端启动
-API 与 Worker。API 默认监听尚未被本机其他服务使用的 `127.0.0.1:18110`。
+API 与 Worker。API 默认监听 `127.0.0.1:18110`。
 打开 http://127.0.0.1:18110/docs 查看交互式 API，按 `Ctrl+C` 会统一停止
 本脚本启动的所有进程。依赖更新后可以强制重新安装：
 
@@ -60,6 +89,16 @@ API 与 Worker。API 默认监听尚未被本机其他服务使用的 `127.0.0.1
 .venv/bin/python -m apps.api
 .venv/bin/python -m apps.worker.run
 ~~~
+
+API 与 Worker 就绪后，可以运行不调用模型或付费服务的 M1 演示：
+
+~~~bash
+.venv/bin/python examples/persona_memory_demo.py
+~~~
+
+脚本导入 `examples/data/demo-journal.md`，等待 Worker 处理，确认第一条候选，并
+输出人物免责声明、确认版本、原始文件定位、引用摘录和审计动作。若资料产生
+其他候选，它们仍保持 `candidate`，可在 `/docs` 中继续审核。
 
 Worker 默认给每次执行 300 秒硬超时，并每 0.25 秒检查一次主动取消请求。
 可以通过 `DIGITAL_EMPLOYEE_WORKER_TASK_TIMEOUT_SECONDS` 和
@@ -259,6 +298,16 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | /health | 运行状态、安全模式与队列计数 |
+| POST | /api/v1/personas | 创建本地所有者的人物档案 |
+| GET | /api/v1/personas | 查看人物档案 |
+| POST | /api/v1/personas/{id}/documents | 导入 UTF-8 文本或 Markdown |
+| GET | /api/v1/personas/{id}/documents | 查看资料及处理状态 |
+| GET | /api/v1/documents/{id} | 查看资料和稳定分块定位 |
+| GET | /api/v1/personas/{id}/memory-candidates | 查看带来源的待审核候选 |
+| POST | /api/v1/memory-candidates/{id}/review | 确认、修订确认或拒绝候选 |
+| GET | /api/v1/personas/{id}/memories | 按状态查看人物记忆 |
+| GET | /api/v1/memories/{id} | 查看当前版本与原始来源证据 |
+| GET | /api/v1/personas/{id}/audit-events | 查看人物重要操作审计 |
 | GET | /api/v1/runtime/status | 检查当前 Agent 运行时及 Hermes 工具边界 |
 | GET | /api/v1/employees | 查看岗位定义 |
 | GET | /api/v1/skills | 查看已注册 Skill |
@@ -290,12 +339,14 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
       worker/              持久化 Worker 与同步调试入口
     core/
       agents/              Employee Definition 与 AgentRuntime
+      ingestion/           可复现切分和可替换候选提取器
+      security/            请求外部的所有者/操作者上下文
       skills/              Skill 注册和权限检查
       workflows/           重试、条件、暂停与检查点
       evaluation/          事实引用与交付质量检查
       identity/            偏好证据提取与 Personal Context 接口
-      services/            项目维护和审批业务流程
-      storage/             SQLite / SQLAlchemy 数据模型
+      services/            项目维护、人物资料导入和审批流程
+      storage/             SQLAlchemy、人物证据库和加密 BlobStore
     adapters/
       github/              GitHub App 鉴权与只读 REST 适配器
       runtime/             可离线验证的规则运行时
@@ -304,6 +355,8 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
       employee_templates/  岗位配置
       skills/              Skill 定义与版本
       workflows/           Workflow 定义与版本
+    migrations/            Alembic schema 演进
+    examples/              无付费服务的最小人物资料演示
     tests/                 核心闭环和 API 测试
 
 当前数字员工设计与安全边界见 [docs/architecture.md](docs/architecture.md)。
@@ -314,26 +367,48 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
 
 ~~~bash
 .venv/bin/pytest -q
+.venv/bin/ruff check apps core examples migrations tests
+DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
+  .venv/bin/alembic upgrade head
+DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
+  .venv/bin/alembic check
 ~~~
 
-测试全部使用内存数据库、伪造的 GitHub 快照和模拟 Hermes HTTP 网关，不消耗
-GitHub 或模型 API 配额。
+测试使用隔离的内存或临时数据库、伪造的 GitHub 快照和模拟 Hermes HTTP 网关，
+不消耗 GitHub 或模型 API 配额。手动迁移检查命令会创建本地测试数据库；不要
+把它指向包含真实资料的数据库。
 
 ## 当前边界
 
-- 队列采用 SQLite 和“至少一次”执行语义，租约、幂等键、主动取消与执行超时
-  可处理重复请求和常见 Worker 故障，但不适合大规模并发。
-- 仍使用自动建表；进入多人试用前应增加正式迁移工具和 PostgreSQL。
-- `user_id` 目前是调用方提供的本地标识，不是可信身份。完成登录、租户校验和
-  API 授权前，不应把当前连接接口直接暴露到不可信网络。
+- Compose 使用 PostgreSQL/pgvector 和 Alembic；`start.sh` 为轻量兼容仍使用
+  SQLite 与自动建表。已有未版本化 SQLite 数据库还没有自动迁移路径。
+- 队列是“至少一次”执行语义，有租约、幂等键、主动取消和超时；PostgreSQL
+  使用行锁跳过已领取任务，但尚未做高并发压测。
+- 人物 API 当前只有服务端配置的单一本地所有者，没有登录、会话或多租户认证。
+  Compose 因此只绑定 `127.0.0.1`；不要反向代理到公网或不可信局域网。
+- 原始上传 Blob 使用 AES-256-GCM 加密；用于审核和后续检索的 chunk、候选内容
+  与引用摘录仍以数据库可读字段保存。生产部署仍需要主机/卷加密和备份保护。
+- M1 提取器按可复现文本块生成候选并做粗粒度类型规则，不是完整的事实抽取或
+  语义归纳。`source_verified` 表示可验证地来自该资料，不表示客观世界事实。
+- 只有 `confirmed` 记忆可视为用户接受的长期记忆，但索引、混合检索、对话回答
+  和 citation 校验尚未实现；候选不会自动进入 Agent 上下文。
+- 人物记忆目前支持查看、确认、修订后确认和拒绝，尚不支持后续编辑、删除、
+  冲突关系、导出或重新向量化。
+- Docker Compose 已覆盖数据库、API 和 Worker；专用 Web UI 尚未实现，当前用
+  `/docs` 与演示脚本操作。本环境没有 Docker 时仍可用 SQLite 跑测试和主机演示。
+- Skill 定义已声明输入/输出、权限、工具、超时、重试、风险、确认、测试、示例
+  和依赖；现有模型 Skill 会执行工具/权限/超时检查。但本版本尚无第三方 Skill
+  安装、启停、升级、独立进程/容器隔离或自动回滚，不能运行不可信社区代码。
+- 原有数字员工 API 的 `user_id` 仍是调用方提供的本地标识，不是可信身份。
 - `rules-v1` 只依据标签、讨论、reaction 与更新时间排序；Hermes 输出也必须
   通过结构校验、证据质量门禁和人工审批，两者都不替代维护者判断。
 - Hermes profile 必须专用于本系统且不启用任何工具或 MCP；普通 Hermes API
   Server 默认包含终端、文件和网络工具，不能直接用于当前只读岗位。
-- 当前偏好抽取只支持用户修改、拒绝和显式反馈的确定性规则；尚无语义合并、
-  冲突检测、身份档案或通用人物记忆。
+- 当前偏好抽取只支持用户修改、拒绝和显式反馈的确定性规则，尚无语义合并或
+  冲突检测。
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-下一阶段应增加网页管理端、PostgreSQL、正式数据库迁移、登录与租户隔离；
-个人记忆抽取仍应建立在真实反馈数据之上。
+唯一下一里程碑是 M2：只索引用户已确认的当前记忆版本，实现词法/向量混合
+检索、严格人物归属过滤，以及每个事实都有可验证 citation 的问答；没有证据时
+必须明确回答“没有找到相关记忆”。

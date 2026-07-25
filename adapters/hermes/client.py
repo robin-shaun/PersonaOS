@@ -88,7 +88,7 @@ class HermesApiClient:
             "Accept": "application/json",
             "Authorization": f"Bearer {normalized_key}",
             "Content-Type": "application/json",
-            "User-Agent": "digital-employee-mvp/0.6",
+            "User-Agent": "personaos/0.7",
         }
 
     async def execute(

@@ -1,0 +1,61 @@
+name: text-ingestion
+version: 1.0.0
+description: 验证已授权的 UTF-8 文本并生成具有稳定字符和行号定位的内容块。
+
+input_schema:
+  source_document_reference: object
+
+inputs:
+  - source_document_reference
+
+required_permissions:
+  - persona.source.read
+  - persona.chunk.write
+
+required_tools:
+  - local_encrypted_blob_reader
+
+timeout_seconds: 30
+risk_level: medium
+requires_confirmation: false
+
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 0.25
+  retry_on:
+    - transient_blob_read_error
+
+steps:
+  - verify_content_hash
+  - decode_utf8
+  - reject_binary_content
+  - split_with_stable_offsets
+
+output_schema:
+  document_id: string
+  chunk_count: integer
+  chunker: string
+  chunker_config_hash: string
+
+evaluation:
+  - source_hash_integrity
+  - stable_chunk_locations
+  - no_raw_content_in_workflow_state
+
+tests:
+  - name: stable_utf8_chunking
+    input_fixture: examples/data/demo-journal.md
+    assertions:
+      - every_chunk_matches_source_slice
+      - replay_produces_identical_chunks
+
+examples:
+  - description: 导入一份 Markdown 日记
+    input:
+      source_document_reference:
+        filename: demo-journal.md
+        media_type: text/markdown
+
+dependencies:
+  - local_encrypted_blob_reader@1
+  - paragraph-window@1.0.0

@@ -6,5 +6,5 @@ __pycache__/
 .env
 *.pem
 *.key
-var/*.db
-var/*.db-*
+*.blob
+/var/

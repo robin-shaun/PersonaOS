@@ -7,6 +7,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -438,3 +439,297 @@ class PreferenceReviewRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
+
+
+class PersonaRecord(Base):
+    __tablename__ = "personas"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'suspended', 'deleted')",
+            name="ck_persona_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    display_name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    simulation_notice: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(40), default="active", index=True, nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class SourceDocumentRecord(Base):
+    __tablename__ = "source_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "persona_id",
+            "content_sha256",
+            name="uq_source_document_persona_content",
+        ),
+        CheckConstraint(
+            "status IN ('uploaded', 'processing', 'ready', 'failed', "
+            "'deleting', 'deleted')",
+            name="ck_source_document_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id"), index=True, nullable=True
+    )
+    source_type: Mapped[str] = mapped_column(
+        String(80), default="uploaded_text", index=True, nullable=False
+    )
+    original_filename: Mapped[str] = mapped_column(String(255))
+    media_type: Mapped[str] = mapped_column(String(120))
+    language: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    object_key: Mapped[str] = mapped_column(String(200))
+    content_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    byte_size: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(
+        String(40), default="uploaded", index=True, nullable=False
+    )
+    ingestion_version: Mapped[str] = mapped_column(
+        String(80), default="text-v1", nullable=False
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class DocumentChunkRecord(Base):
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "ordinal",
+            name="uq_document_chunk_ordinal",
+        ),
+        UniqueConstraint(
+            "document_id",
+            "char_start",
+            "char_end",
+            name="uq_document_chunk_location",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id"), index=True
+    )
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    content_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    char_start: Mapped[int] = mapped_column(Integer)
+    char_end: Mapped[int] = mapped_column(Integer)
+    line_start: Mapped[int] = mapped_column(Integer)
+    line_end: Mapped[int] = mapped_column(Integer)
+    locator: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    chunker_name: Mapped[str] = mapped_column(String(100))
+    chunker_version: Mapped[str] = mapped_column(String(50))
+    chunker_config_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class PersonaMemoryRecord(Base):
+    __tablename__ = "persona_memories"
+    __table_args__ = (
+        UniqueConstraint(
+            "persona_id",
+            "candidate_fingerprint",
+            name="uq_persona_memory_candidate",
+        ),
+        CheckConstraint(
+            "status IN ('candidate', 'confirmed', 'rejected', "
+            "'superseded', 'deleted')",
+            name="ck_persona_memory_status",
+        ),
+        CheckConstraint(
+            "memory_type IN ('episodic', 'semantic', 'procedural', "
+            "'preference', 'relationship', 'reflection')",
+            name="ck_persona_memory_type",
+        ),
+        CheckConstraint(
+            "epistemic_status IN ('user_asserted', 'source_verified', "
+            "'model_summary', 'model_inference', 'user_rule')",
+            name="ck_persona_memory_epistemic_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    source_document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id"), index=True
+    )
+    memory_type: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(
+        String(40), default="candidate", index=True, nullable=False
+    )
+    epistemic_status: Mapped[str] = mapped_column(String(40), index=True)
+    current_version_id: Mapped[str | None] = mapped_column(
+        String(36), index=True, nullable=True
+    )
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    sensitivity: Mapped[str] = mapped_column(
+        String(40), default="private", index=True, nullable=False
+    )
+    visibility: Mapped[str] = mapped_column(
+        String(40), default="owner", index=True, nullable=False
+    )
+    event_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    confirmed_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class PersonaMemoryVersionRecord(Base):
+    __tablename__ = "persona_memory_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "memory_id",
+            "version",
+            name="uq_persona_memory_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    memory_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memories.id"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    raw_content: Mapped[str] = mapped_column(Text)
+    structured_summary: Mapped[str] = mapped_column(Text)
+    metadata_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    created_by_type: Mapped[str] = mapped_column(String(40))
+    created_by_id: Mapped[str] = mapped_column(String(200))
+    change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extractor_name: Mapped[str] = mapped_column(String(100))
+    extractor_version: Mapped[str] = mapped_column(String(50))
+    model_call_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class PersonaMemoryEvidenceRecord(Base):
+    __tablename__ = "persona_memory_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "memory_version_id",
+            "document_chunk_id",
+            "relation",
+            name="uq_persona_memory_evidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    memory_version_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memory_versions.id"), index=True
+    )
+    source_document_id: Mapped[str] = mapped_column(
+        ForeignKey("source_documents.id"), index=True
+    )
+    document_chunk_id: Mapped[str] = mapped_column(
+        ForeignKey("document_chunks.id"), index=True
+    )
+    relation: Mapped[str] = mapped_column(
+        String(40), default="supports", nullable=False
+    )
+    locator_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    excerpt: Mapped[str] = mapped_column(Text)
+    excerpt_sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class AuditEventRecord(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "dedupe_key",
+            name="uq_audit_event_owner_dedupe",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True, nullable=False
+    )
+    request_id: Mapped[str | None] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    correlation_id: Mapped[str | None] = mapped_column(
+        String(100), index=True, nullable=True
+    )
+    dedupe_key: Mapped[str] = mapped_column(String(300))
+    actor_type: Mapped[str] = mapped_column(String(40))
+    actor_id: Mapped[str] = mapped_column(String(200))
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    persona_id: Mapped[str | None] = mapped_column(
+        ForeignKey("personas.id"), index=True, nullable=True
+    )
+    action: Mapped[str] = mapped_column(String(120), index=True)
+    resource_type: Mapped[str] = mapped_column(String(80), index=True)
+    resource_id: Mapped[str] = mapped_column(String(100), index=True)
+    outcome: Mapped[str] = mapped_column(
+        String(40), default="succeeded", index=True, nullable=False
+    )
+    risk_level: Mapped[str] = mapped_column(
+        String(40), default="low", nullable=False
+    )
+    approval_id: Mapped[str | None] = mapped_column(
+        ForeignKey("approvals.id"), index=True, nullable=True
+    )
+    before_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    after_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
