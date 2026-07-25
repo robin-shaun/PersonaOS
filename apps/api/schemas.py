@@ -154,6 +154,13 @@ class PersonaCreate(BaseModel):
         return normalized
 
 
+class PersonaModelPolicyUpdateRequest(BaseModel):
+    allowed_model_boundaries: list[
+        Literal["local", "private_network", "external"]
+    ] = Field(min_length=1)
+    external_data_acknowledged: bool = False
+
+
 class PersonaMemoryReviewRequest(BaseModel):
     action: Literal["confirm", "reject"]
     edited_content: str | None = Field(default=None, max_length=20_000)
@@ -169,6 +176,50 @@ class PersonaMemoryReviewRequest(BaseModel):
         ):
             raise ValueError("edited_content must not be empty")
         return self
+
+
+class PersonaMemoryUpdateRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+    content: str | None = Field(default=None, max_length=20_000)
+    sensitivity: Literal["public", "private", "restricted"] | None = None
+    reason: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_update(self) -> PersonaMemoryUpdateRequest:
+        if self.content is None and self.sensitivity is None:
+            raise ValueError("content or sensitivity is required")
+        if self.content is not None and not self.content.strip():
+            raise ValueError("content must not be empty")
+        if not self.reason.strip():
+            raise ValueError("reason must not be empty")
+        return self
+
+
+class PersonaMemoryRelationCreate(BaseModel):
+    from_memory_id: str = Field(min_length=1, max_length=36)
+    to_memory_id: str = Field(min_length=1, max_length=36)
+    relation: Literal[
+        "supports",
+        "conflicts",
+        "derived_from",
+        "supersedes",
+        "related_to",
+    ]
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    evidence_memory_version_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("evidence_memory_version_ids")
+    @classmethod
+    def validate_evidence_ids(cls, value: list[str]) -> list[str]:
+        if len(value) > 100:
+            raise ValueError("at most 100 evidence memory versions are allowed")
+        if any(not item.strip() or len(item) > 36 for item in value):
+            raise ValueError("evidence memory version IDs are invalid")
+        return value
+
+
+class PersonaExportRequest(BaseModel):
+    include_raw_sources: bool = True
 
 
 class PersonaConversationCreate(BaseModel):

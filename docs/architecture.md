@@ -2,7 +2,7 @@
 
 ## 产品边界
 
-PersonaOS `0.8.0` 有两个相互隔离但复用同一运行底座的产品闭环：
+PersonaOS `0.9.0` 有两个相互隔离但复用同一运行底座的产品闭环：
 
 1. 人物资料闭环：创建 Persona，导入授权文本，生成有来源候选，由用户确认或
    拒绝，并仅用确认的当前版本完成混合检索与带引用问答；
@@ -10,7 +10,7 @@ PersonaOS `0.8.0` 有两个相互隔离但复用同一运行底座的产品闭�
    用户审批形成的行为证据。
 
 人物闭环不声称系统是现实中的本人；项目维护员工不自动修改 GitHub。Web UI、
-登录、多租户、记忆删除和模型驱动总结不属于本版本。
+登录、多租户和模型驱动总结不属于本版本。
 
 ## 人物资料证据链
 
@@ -74,6 +74,67 @@ current-version 过滤。
 MemoryVersion、Evidence、DocumentChunk 和 SourceDocument。没有超过召回阈值
 的证据时，服务返回固定“没有找到相关的已确认记忆”响应，并记录模型未调用。
 
+## 记忆版本、关系与模型数据边界
+
+确认记忆的修改不执行原地覆盖。客户端必须提交 `expected_version`；仓库在事务
+内锁定当前记忆，只有版本一致时才追加 `MemoryVersion`、复制来源证据、更新
+`current_version_id` 并为新版本建立索引。正文被用户改写后，系统明确改成
+`user_asserted` 和 `source_bound=false`，来源关系改为 `derived_from`。因此旧
+版本仍可审计，但不会被当前版本检索误召回，也不会把用户改写伪装成资料原文。
+
+记忆关系以独立记录保存，支持 `supports`、`conflicts`、`derived_from`、
+`supersedes` 和 `related_to`。关系两端必须是同一 owner、同一 Persona 的已确认
+记忆；可选的证据版本只能属于关系两端，删除任一记忆会先删除相关边。
+
+每个回答生成器和 embedding provider 在调用前声明数据边界：
+
+| 数据边界 | 可进入模型的记忆敏感等级 | 默认授权 |
+| --- | --- | --- |
+| `local` | `public`、`private`、`restricted` | 是 |
+| `private_network` | `public`、`private` | 否 |
+| `external` | `public` | 否，启用时需显式确认 |
+
+策略在生成用户消息、向量化和检索之前执行。允许等级同时进入词法 SQL、向量 SQL
+和证据解析查询，不能只依赖 prompt 提醒。RetrievalRun 固化本次边界和允许等级；
+生成结果声明的边界若与调用前声明不一致，回答不会落库。非本地生成器只收到
+已允许 Memory 的摘要和 citation ID；原始 evidence excerpt、文件信息和 locator
+仍留在 PersonaOS 内部，生成完成后再用本地完整证据校验并持久化 citation。
+
+## 删除依赖图与可验证导出
+
+资料和记忆删除是高风险操作，API 必须带 `confirm=true`。依赖清理按一个数据库
+事务完成；资料 Blob 因为属于外部存储，采用可重试的两阶段状态：
+
+    DELETE SourceDocument
+            │
+            ├── 取消仍在排队的导入任务
+            ├── DB: status = deleting
+            ├── Blob: 全局 object_key 引用计数为 0 时删除
+            └── DB transaction
+                  ├── 使依赖 RetrievalRun / ModelCall 失效
+                  ├── 擦除依赖回答正文、claim 和全部 citation
+                  ├── 删除 relation / embedding / evidence / version / memory
+                  ├── 删除 chunk / document
+                  └── 写入只含 ID、哈希和计数的 AuditEvent 墓碑
+
+若 Blob 操作失败，资料保留在 `deleting`，重试同一请求会继续；成功删除后的重复
+请求通过审计墓碑返回幂等回执。相同内容被多个资料记录引用时，只有最后一个引用
+删除后才移除 Blob。当前上传和删除使用单 API 进程锁避免本地竞态；多 API 副本
+仍需要数据库级对象租约或独立对象存储协调器。
+
+删除记忆不会删除仍有其他用途的来源 Blob，但会删除该记忆全部版本、证据和所有
+embedding 空间的向量。任何曾把目标版本放入上下文的回答都会被替换成固定删除
+提示，防止删除原始资料后派生正文仍可读取。
+
+JSON 导出包含 Persona、资料/分块、记忆版本/证据/关系、会话、检索、模型调用、
+引用和审计。调用者可选择是否包含解密后的原始资料；向量数组永不导出，只保留
+空间、版本和内容哈希元数据。输出在返回前计算 SHA-256 并写审计；当前实现整体
+缓冲且默认限制为 25 MiB。
+
+应用级删除只证明 PersonaOS 当前数据库与 BlobStore 不再返回目标数据，不承诺
+擦除 SSD 固件、数据库 WAL、对象存储历史版本或离线备份。生产部署必须另行定义
+备份保留、密钥销毁与介质净化策略。
+
 ## 模块关系
 
     API ──入队──▶ SQL Queue ◀──领取/续租── Worker
@@ -110,8 +171,9 @@ Worker 原子领取作业后定期续租；进程在完成前退出时，租约�
 
 轻量主机开发使用 SQLite；Compose 使用 PostgreSQL，并在领取查询中使用
 `FOR UPDATE SKIP LOCKED`。两者都保留后续的条件更新作为租约所有权保护。
-Compose 启动 API 前执行 Alembic，应用进程关闭自动建表；`start.sh` 暂时保留
-自动建表以兼容现有未版本化 SQLite 数据库。
+Compose 启动 API 前执行 Alembic，应用进程关闭自动建表；`start.sh` 会升级
+新库、已版本化库和可明确识别的未版本化 M1/M2 人物库。人物功能前的旧 SQLite
+仍保留自动建表兼容路径；部分迁移的未版本化人物库会拒绝自动 stamp。
 
 同一用户可以通过 `Idempotency-Key` 安全重试创建请求。相同键和相同输入返回
 原任务；相同键配不同输入会返回冲突。Worker 自动重试耗尽后，任务保持
@@ -229,6 +291,8 @@ AgentRuntime 或业务 Workflow 的调用边界。
   AES-256-GCM 加密；密钥来自环境、密钥文件或首次启动生成的 0600 文件。
 - Blob object key 有固定格式和根目录约束，读取时同时验证 AEAD tag 与内容哈希。
 - 候选永不自动确认；确认总是产生新的人工版本，拒绝候选不进入长期记忆。
+- 模型与 embedding 边界默认仅允许 local；外部边界只接收 public 记忆。
+- 删除会清理派生回答和全部引用；审计墓碑不保存记忆、chunk 或回答正文。
 - 人物 AuditEvent 只保存状态、哈希、计数和错误类型，不保存原始正文。
 - Skill 合约声明权限、工具、超时、重试、风险和确认元数据；SkillExecutor 对
   模型 Skill 强制检查岗位工具/权限并执行超时。第三方 Skill 的安装、启停、
@@ -264,6 +328,6 @@ Runs 提交、状态与停止能力，再确认 API Server 没有启用任何 to
 
 ## 唯一下一里程碑
 
-M3 只实现记忆与资料的隐私生命周期：确认后版本化编辑、删除与派生清理、
-supports/conflicts/derived_from 关系、可验证导出和模型数据边界授权。删除验收
-必须覆盖 Blob、chunk、embedding、引用与检索结果，同时审计墓碑不保留正文。
+M4 只交付人物管理 Web UI：资料导入、候选审核、记忆版本与关系、问答引用、
+删除确认和审计页面，并接入现有 PostgreSQL/pgvector Compose。身份认证和远程
+多租户不会伪装成 M4 已完成能力。

@@ -33,6 +33,9 @@ from core.skills.executor import SkillExecutor
 from core.skills.registry import SkillRegistry
 from core.storage.blob import EncryptedLocalBlobStore, decode_blob_key
 from core.storage.database import Database
+from core.storage.persona_lifecycle_repository import (
+    PersonaLifecycleRepository,
+)
 from core.storage.persona_repository import PersonaRepository
 from core.storage.repository import ExecutionStore
 from core.workflows.models import WorkflowCatalog
@@ -130,6 +133,7 @@ def build_container(
     )
     personalization = PersonalizationService(store)
     persona_repository = PersonaRepository(database)
+    persona_lifecycle_repository = PersonaLifecycleRepository(database)
     retrieval_repository = PersonaRetrievalRepository(database)
     embedding_provider = FeatureHashEmbeddingProvider(
         dimensions=settings.persona_embedding_dimensions
@@ -165,8 +169,10 @@ def build_container(
         repository=persona_repository,
         execution_store=store,
         blob_store=blob_store,
+        lifecycle_repository=persona_lifecycle_repository,
         memory_index=memory_index,
         max_upload_bytes=settings.persona_max_upload_bytes,
+        max_export_bytes=settings.persona_max_export_bytes,
     )
     persona_qa = PersonaQuestionAnsweringService(
         repository=retrieval_repository,

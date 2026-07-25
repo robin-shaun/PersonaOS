@@ -11,10 +11,12 @@ class RetrievedEvidence(BaseModel):
     memory_id: str
     memory_version_id: str
     evidence_id: str
+    evidence_relation: str
     source_document_id: str
     document_chunk_id: str
     memory_type: str
     epistemic_status: str
+    sensitivity: str
     summary: str
     excerpt: str
     locator: dict[str, Any]
@@ -49,6 +51,11 @@ class GenerationResult(BaseModel):
 
 
 class PersonaAnswerGenerator(Protocol):
+    @property
+    def data_boundary(self) -> Literal[
+        "local", "private_network", "external"
+    ]: ...
+
     async def generate(
         self,
         *,

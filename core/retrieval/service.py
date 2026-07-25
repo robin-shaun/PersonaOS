@@ -6,6 +6,11 @@ from core.retrieval.embeddings import EmbeddingProvider
 from core.retrieval.models import RetrievedEvidence
 from core.retrieval.repository import PersonaRetrievalRepository
 from core.security.access import AccessContext
+from core.security.data_policy import (
+    ModelDataPolicyError,
+    allowed_sensitivities_for_boundary,
+    require_boundary_allowed,
+)
 
 
 class MemoryIndexService:
@@ -23,12 +28,25 @@ class MemoryIndexService:
     def embedding_space_id(self) -> str:
         return self._embeddings.space.id
 
+    @property
+    def data_boundary(self) -> str:
+        return self._embeddings.space.data_boundary
+
     def index_memory(
         self,
         access: AccessContext,
         memory_id: str,
     ) -> dict[str, Any]:
         indexable = self._repository.get_indexable_memory(access, memory_id)
+        allowed_sensitivities = self._require_persona_boundary(
+            access,
+            persona_id=str(indexable["persona_id"]),
+        )
+        if str(indexable["sensitivity"]) not in allowed_sensitivities:
+            raise ModelDataPolicyError(
+                "Memory sensitivity is not allowed for the embedding "
+                f"data boundary: {self._embeddings.space.data_boundary}"
+            )
         existing = self._repository.existing_memory_embedding(
             access,
             indexable=indexable,
@@ -98,14 +116,20 @@ class MemoryIndexService:
         *,
         persona_id: str,
     ) -> dict[str, Any]:
+        allowed_sensitivities = self._require_persona_boundary(
+            access,
+            persona_id=persona_id,
+        )
         eligible = self._repository.list_indexable_memories(
             access,
             persona_id=persona_id,
+            allowed_sensitivities=allowed_sensitivities,
         )
         indexable = self._repository.list_missing_indexable_memories(
             access,
             persona_id=persona_id,
             embedding_space_id=self.embedding_space_id,
+            allowed_sensitivities=allowed_sensitivities,
         )
         vectors = (
             self._embeddings.embed_documents(
@@ -138,9 +162,32 @@ class MemoryIndexService:
         *,
         persona_id: str,
     ) -> None:
+        allowed_sensitivities = self._require_persona_boundary(
+            access,
+            persona_id=persona_id,
+        )
         self._repository.list_indexable_memories(
             access,
             persona_id=persona_id,
+            allowed_sensitivities=allowed_sensitivities,
+        )
+
+    def _require_persona_boundary(
+        self,
+        access: AccessContext,
+        *,
+        persona_id: str,
+    ) -> tuple[str, ...]:
+        policy = self._repository.get_persona_policy(
+            access,
+            persona_id=persona_id,
+        )
+        require_boundary_allowed(
+            allowed_boundaries=policy["allowed_model_boundaries"],
+            requested_boundary=self._embeddings.space.data_boundary,
+        )
+        return allowed_sensitivities_for_boundary(
+            self._embeddings.space.data_boundary
         )
 
 
@@ -164,6 +211,10 @@ class HybridRetrievalService:
     def embedding_space_id(self) -> str:
         return self._embeddings.space.id
 
+    @property
+    def data_boundary(self) -> str:
+        return self._embeddings.space.data_boundary
+
     def search(
         self,
         access: AccessContext,
@@ -171,6 +222,7 @@ class HybridRetrievalService:
         persona_id: str,
         query: str,
         top_k: int,
+        allowed_sensitivities: tuple[str, ...],
     ) -> list[RetrievedEvidence]:
         candidate_limit = max(top_k * 5, 20)
         lexical = self._repository.rank_lexical(
@@ -179,6 +231,7 @@ class HybridRetrievalService:
             query=query,
             limit=candidate_limit,
             minimum_score=self._lexical_minimum_score,
+            allowed_sensitivities=allowed_sensitivities,
         )
         vector = self._repository.rank_vector(
             access,
@@ -187,6 +240,7 @@ class HybridRetrievalService:
             query_embedding=self._embeddings.embed_query(query),
             limit=candidate_limit,
             minimum_similarity=self._vector_minimum_similarity,
+            allowed_sensitivities=allowed_sensitivities,
         )
         lexical_by_id = {
             str(item["memory_version_id"]): {
@@ -222,6 +276,7 @@ class HybridRetrievalService:
             access,
             persona_id=persona_id,
             version_ids=[item[0] for item in selected],
+            allowed_sensitivities=allowed_sensitivities,
         )
         results: list[RetrievedEvidence] = []
         for version_id, rrf_score, _ in selected:

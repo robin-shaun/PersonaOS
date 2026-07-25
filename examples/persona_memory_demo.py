@@ -17,7 +17,12 @@ def _required(response: httpx.Response) -> Any:
     return response.json()
 
 
-def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
+def run_demo(
+    base_url: str,
+    source_path: Path,
+    *,
+    delete_source: bool = False,
+) -> dict[str, Any]:
     with httpx.Client(base_url=base_url, timeout=10, trust_env=False) as client:
         persona = _required(
             client.post(
@@ -68,6 +73,16 @@ def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
                 },
             )
         )
+        updated = _required(
+            client.patch(
+                f"/api/v1/memories/{confirmed['memory']['id']}",
+                json={
+                    "expected_version": confirmed["current_version"]["version"],
+                    "sensitivity": "public",
+                    "reason": "PersonaOS M3 演示：授权本地演示记忆为公开等级。",
+                },
+            )
+        )
         conversation = _required(
             client.post(
                 f"/api/v1/personas/{persona['id']}/conversations",
@@ -83,9 +98,17 @@ def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
                 },
             )
         )
-        audits = _required(client.get(f"/api/v1/personas/{persona['id']}/audit-events"))
-        first_evidence = confirmed["evidence"][0]
-        return {
+        exported = _required(
+            client.post(
+                f"/api/v1/personas/{persona['id']}/export",
+                json={"include_raw_sources": False},
+            )
+        )
+        audits = _required(
+            client.get(f"/api/v1/personas/{persona['id']}/audit-events")
+        )
+        first_evidence = updated["evidence"][0]
+        result = {
             "persona": {
                 "id": persona["id"],
                 "display_name": persona["display_name"],
@@ -94,11 +117,12 @@ def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
             "document": upload["document"],
             "candidate_count": len(candidates),
             "confirmed_memory": {
-                "id": confirmed["memory"]["id"],
-                "memory_type": confirmed["memory"]["memory_type"],
-                "version": confirmed["current_version"]["version"],
-                "summary": confirmed["current_version"]["structured_summary"],
-                "epistemic_status": confirmed["memory"]["epistemic_status"],
+                "id": updated["memory"]["id"],
+                "memory_type": updated["memory"]["memory_type"],
+                "version": updated["current_version"]["version"],
+                "summary": updated["current_version"]["structured_summary"],
+                "epistemic_status": updated["memory"]["epistemic_status"],
+                "sensitivity": updated["memory"]["sensitivity"],
             },
             "citation": {
                 "source_filename": first_evidence["source_document"][
@@ -114,13 +138,36 @@ def run_demo(base_url: str, source_path: Path) -> dict[str, Any]:
                 "citations": answer["citations"],
                 "embedding_space_id": answer["retrieval_run"]["embedding_space_id"],
             },
+            "export_manifest": exported["manifest"],
             "audit_actions": [event["action"] for event in audits],
         }
+        if delete_source:
+            deletion = _required(
+                client.delete(
+                    f"/api/v1/documents/{upload['document']['id']}",
+                    params={"confirm": "true"},
+                )
+            )
+            messages = _required(
+                client.get(
+                    f"/api/v1/conversations/{conversation['id']}/messages"
+                )
+            )
+            redacted_answer = next(
+                item
+                for item in messages
+                if item["id"] == answer["assistant_message"]["id"]
+            )
+            result["deletion_proof"] = {
+                "receipt": deletion,
+                "answer_after_deletion": redacted_answer,
+            }
+        return result
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the evidence-bound PersonaOS M2 question-answer demo."
+        description="Run the PersonaOS M3 evidence and lifecycle demo."
     )
     parser.add_argument(
         "--base-url",
@@ -131,8 +178,20 @@ def main() -> None:
         type=Path,
         default=DEFAULT_SOURCE,
     )
+    parser.add_argument(
+        "--delete-source",
+        action="store_true",
+        help=(
+            "Permanently delete the demo source, its memories, embeddings, "
+            "citations and derived answer after collecting the result."
+        ),
+    )
     args = parser.parse_args()
-    result = run_demo(args.base_url.rstrip("/"), args.source.resolve())
+    result = run_demo(
+        args.base_url.rstrip("/"),
+        args.source.resolve(),
+        delete_source=args.delete_source,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

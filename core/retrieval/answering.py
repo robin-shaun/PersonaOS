@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from core.retrieval.models import (
     AnswerClaim,
     AnswerDraft,
@@ -16,6 +18,10 @@ class CitationValidationError(ValueError):
 
 class EvidenceOnlyAnswerGenerator:
     """Offline answer baseline that only restates retrieved confirmed memories."""
+
+    @property
+    def data_boundary(self) -> Literal["local"]:
+        return "local"
 
     async def generate(
         self,

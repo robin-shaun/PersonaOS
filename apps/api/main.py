@@ -23,7 +23,11 @@ from apps.api.schemas import (
     GitHubConnectionCreate,
     PersonaConversationCreate,
     PersonaCreate,
+    PersonaExportRequest,
+    PersonaMemoryRelationCreate,
     PersonaMemoryReviewRequest,
+    PersonaMemoryUpdateRequest,
+    PersonaModelPolicyUpdateRequest,
     PersonaQuestionCreate,
     PreferenceReviewRequest,
     ProjectMaintenanceTaskCreate,
@@ -31,6 +35,7 @@ from apps.api.schemas import (
 )
 from core.bootstrap import Container, build_container
 from core.retrieval.answering import CitationValidationError
+from core.security.data_policy import ModelDataPolicyError
 from core.services.github_connections import GitHubAppNotConfiguredError
 from core.services.project_maintenance import (
     ProjectMaintenanceCommand,
@@ -43,10 +48,10 @@ def create_app(container: Container | None = None) -> FastAPI:
     container = container or build_container()
     app = FastAPI(
         title="PersonaOS",
-        version="0.8.0",
+        version="0.9.0",
         description=(
-            "Evidence-driven digital employee and review-first persona memory. "
-            "Every long-term memory remains traceable to authorized source text."
+            "Evidence-driven digital employee and review-first persona memory "
+            "with versioned edits, model data boundaries and auditable deletion."
         ),
     )
     app.state.container = container
@@ -77,6 +82,16 @@ def create_app(container: Container | None = None) -> FastAPI:
                 "task_id": exc.task_id,
                 "trace_url": f"/api/v1/tasks/{exc.task_id}",
             },
+        )
+
+    @app.exception_handler(ModelDataPolicyError)
+    async def model_data_policy_handler(
+        _: Request,
+        exc: ModelDataPolicyError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": str(exc)},
         )
 
     @app.get("/health")
@@ -148,6 +163,32 @@ def create_app(container: Container | None = None) -> FastAPI:
                 detail=str(exc),
             ) from exc
 
+    @app.patch("/api/v1/personas/{persona_id}/model-policy")
+    async def update_persona_model_policy(
+        persona_id: str,
+        payload: PersonaModelPolicyUpdateRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.update_model_policy(
+                persona_access(request),
+                persona_id=persona_id,
+                allowed_model_boundaries=payload.allowed_model_boundaries,
+                external_data_acknowledged=(
+                    payload.external_data_acknowledged
+                ),
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
     @app.post(
         "/api/v1/personas/{persona_id}/documents",
         status_code=status.HTTP_202_ACCEPTED,
@@ -215,6 +256,29 @@ def create_app(container: Container | None = None) -> FastAPI:
                 detail=str(exc),
             ) from exc
 
+    @app.delete("/api/v1/documents/{document_id}")
+    async def delete_persona_document(
+        document_id: str,
+        request: Request,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.delete_document(
+                persona_access(request),
+                document_id=document_id,
+                confirmed=confirm,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
     @app.get("/api/v1/personas/{persona_id}/memory-candidates")
     async def list_persona_memory_candidates(
         persona_id: str,
@@ -271,6 +335,126 @@ def create_app(container: Container | None = None) -> FastAPI:
                 detail=str(exc),
             ) from exc
 
+    @app.patch("/api/v1/memories/{memory_id}")
+    async def update_persona_memory(
+        memory_id: str,
+        payload: PersonaMemoryUpdateRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.update_memory(
+                persona_access(request),
+                memory_id=memory_id,
+                expected_version=payload.expected_version,
+                content=payload.content,
+                sensitivity=payload.sensitivity,
+                reason=payload.reason,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+    @app.delete("/api/v1/memories/{memory_id}")
+    async def delete_persona_memory(
+        memory_id: str,
+        request: Request,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.delete_memory(
+                persona_access(request),
+                memory_id=memory_id,
+                confirmed=confirm,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/personas/{persona_id}/memory-relations",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_persona_memory_relation(
+        persona_id: str,
+        payload: PersonaMemoryRelationCreate,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.create_memory_relation(
+                persona_access(request),
+                persona_id=persona_id,
+                from_memory_id=payload.from_memory_id,
+                to_memory_id=payload.to_memory_id,
+                relation=payload.relation,
+                confidence=payload.confidence,
+                evidence_memory_version_ids=(
+                    payload.evidence_memory_version_ids
+                ),
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+
+    @app.get("/api/v1/memories/{memory_id}/relations")
+    async def list_persona_memory_relations(
+        memory_id: str,
+        request: Request,
+    ) -> list[dict[str, Any]]:
+        try:
+            return container.personas.list_memory_relations(
+                persona_access(request),
+                memory_id=memory_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.delete("/api/v1/memory-relations/{relation_id}")
+    async def delete_persona_memory_relation(
+        relation_id: str,
+        request: Request,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.delete_memory_relation(
+                persona_access(request),
+                relation_id=relation_id,
+                confirmed=confirm,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
     @app.post("/api/v1/memory-candidates/{memory_id}/review")
     async def review_persona_memory(
         memory_id: str,
@@ -311,6 +495,29 @@ def create_app(container: Container | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+    @app.post("/api/v1/personas/{persona_id}/export")
+    async def export_persona(
+        persona_id: str,
+        payload: PersonaExportRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        try:
+            return container.personas.export_persona(
+                persona_access(request),
+                persona_id=persona_id,
+                include_raw_sources=payload.include_raw_sources,
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=str(exc),
             ) from exc
 

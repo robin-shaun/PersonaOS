@@ -16,6 +16,11 @@ from core.retrieval.embeddings import (
 )
 from core.retrieval.models import GenerationResult, RetrievedEvidence
 from core.security.access import AccessContext
+from core.security.data_policy import (
+    ModelDataPolicyError,
+    allowed_sensitivities_for_boundary,
+    require_boundary_allowed,
+)
 from core.storage.database import Database
 from core.storage.models import (
     AnswerCitationRecord,
@@ -114,6 +119,53 @@ class PersonaRetrievalRepository:
                 raise KeyError(f"EmbeddingSpaceRecord not found: {space_id}")
             return _record_dict(record)
 
+    def get_persona_policy(
+        self,
+        access: AccessContext,
+        *,
+        persona_id: str,
+    ) -> dict[str, Any]:
+        with self.database.session() as session:
+            persona = self._owned_persona(
+                session,
+                access,
+                persona_id,
+                require_active=True,
+            )
+            return {
+                "persona_id": persona.id,
+                "allowed_model_boundaries": list(
+                    persona.allowed_model_boundaries or ["local"]
+                ),
+            }
+
+    def get_conversation_context(
+        self,
+        access: AccessContext,
+        *,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        with self.database.session() as session:
+            conversation = self._owned_conversation(
+                session,
+                access,
+                conversation_id,
+                require_active=True,
+            )
+            persona = self._owned_persona(
+                session,
+                access,
+                conversation.persona_id,
+                require_active=True,
+            )
+            return {
+                "conversation_id": conversation.id,
+                "persona_id": persona.id,
+                "allowed_model_boundaries": list(
+                    persona.allowed_model_boundaries or ["local"]
+                ),
+            }
+
     def get_indexable_memory(
         self,
         access: AccessContext,
@@ -144,6 +196,7 @@ class PersonaRetrievalRepository:
                 "memory_version_id": version.id,
                 "persona_id": memory.persona_id,
                 "owner_id": memory.owner_id,
+                "sensitivity": memory.sensitivity,
                 "content": (
                     f"{version.structured_summary}\n{version.raw_content}".strip()
                 ),
@@ -160,6 +213,7 @@ class PersonaRetrievalRepository:
         access: AccessContext,
         *,
         persona_id: str,
+        allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
         with self.database.session() as session:
             self._owned_persona(session, access, persona_id, require_active=True)
@@ -176,6 +230,15 @@ class PersonaRetrievalRepository:
                         PersonaMemoryRecord.persona_id == persona_id,
                         PersonaMemoryRecord.status == "confirmed",
                         PersonaMemoryRecord.visibility == "owner",
+                        *(
+                            (
+                                PersonaMemoryRecord.sensitivity.in_(
+                                    allowed_sensitivities
+                                ),
+                            )
+                            if allowed_sensitivities is not None
+                            else ()
+                        ),
                         self._live_evidence_exists(PersonaMemoryVersionRecord.id),
                     )
                     .order_by(
@@ -190,6 +253,7 @@ class PersonaRetrievalRepository:
                     "memory_version_id": version.id,
                     "persona_id": memory.persona_id,
                     "owner_id": memory.owner_id,
+                    "sensitivity": memory.sensitivity,
                     "content": (
                         f"{version.structured_summary}\n{version.raw_content}".strip()
                     ),
@@ -209,10 +273,12 @@ class PersonaRetrievalRepository:
         *,
         persona_id: str,
         embedding_space_id: str,
+        allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
         indexable = self.list_indexable_memories(
             access,
             persona_id=persona_id,
+            allowed_sensitivities=allowed_sensitivities,
         )
         if not indexable:
             return []
@@ -289,6 +355,25 @@ class PersonaRetrievalRepository:
                 or memory.current_version_id != str(indexable["memory_version_id"])
             ):
                 raise ValueError("memory changed before its embedding was written")
+            persona = self._owned_persona(
+                session,
+                access,
+                memory.persona_id,
+                require_active=True,
+            )
+            require_boundary_allowed(
+                allowed_boundaries=list(
+                    persona.allowed_model_boundaries or ["local"]
+                ),
+                requested_boundary=space.data_boundary,
+            )
+            if memory.sensitivity not in allowed_sensitivities_for_boundary(
+                space.data_boundary
+            ):
+                raise ModelDataPolicyError(
+                    "Memory sensitivity is not allowed for the embedding "
+                    f"data boundary: {space.data_boundary}"
+                )
             existing = session.scalar(
                 select(PersonaMemoryEmbeddingRecord).where(
                     PersonaMemoryEmbeddingRecord.memory_version_id
@@ -330,6 +415,7 @@ class PersonaRetrievalRepository:
         query: str,
         limit: int,
         minimum_score: float,
+        allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
         with self.database.session() as session:
             self._owned_persona(session, access, persona_id, require_active=True)
@@ -357,7 +443,11 @@ class PersonaRetrievalRepository:
                             == PersonaMemoryVersionRecord.id,
                         )
                         .where(
-                            *self._memory_filters(access, persona_id),
+                            *self._memory_filters(
+                                access,
+                                persona_id,
+                                allowed_sensitivities=allowed_sensitivities,
+                            ),
                             self._live_evidence_exists(PersonaMemoryVersionRecord.id),
                             or_(
                                 ts_vector.op("@@")(ts_query),
@@ -386,7 +476,11 @@ class PersonaRetrievalRepository:
                         == PersonaMemoryVersionRecord.id,
                     )
                     .where(
-                        *self._memory_filters(access, persona_id),
+                        *self._memory_filters(
+                            access,
+                            persona_id,
+                            allowed_sensitivities=allowed_sensitivities,
+                        ),
                         self._live_evidence_exists(PersonaMemoryVersionRecord.id),
                     )
                 ).scalars()
@@ -422,6 +516,7 @@ class PersonaRetrievalRepository:
         query_embedding: list[float],
         limit: int,
         minimum_similarity: float,
+        allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> list[dict[str, Any]]:
         with self.database.session() as session:
             self._owned_persona(session, access, persona_id, require_active=True)
@@ -454,7 +549,11 @@ class PersonaRetrievalRepository:
                             == PersonaMemoryEmbeddingRecord.memory_version_id,
                         )
                         .where(
-                            *self._memory_filters(access, persona_id),
+                            *self._memory_filters(
+                                access,
+                                persona_id,
+                                allowed_sensitivities=allowed_sensitivities,
+                            ),
                             PersonaMemoryEmbeddingRecord.owner_id == access.owner_id,
                             PersonaMemoryEmbeddingRecord.persona_id == persona_id,
                             PersonaMemoryEmbeddingRecord.embedding_space_id
@@ -488,7 +587,11 @@ class PersonaRetrievalRepository:
                         == PersonaMemoryEmbeddingRecord.memory_version_id,
                     )
                     .where(
-                        *self._memory_filters(access, persona_id),
+                        *self._memory_filters(
+                            access,
+                            persona_id,
+                            allowed_sensitivities=allowed_sensitivities,
+                        ),
                         PersonaMemoryEmbeddingRecord.owner_id == access.owner_id,
                         PersonaMemoryEmbeddingRecord.persona_id == persona_id,
                         PersonaMemoryEmbeddingRecord.embedding_space_id
@@ -525,6 +628,7 @@ class PersonaRetrievalRepository:
         *,
         persona_id: str,
         version_ids: list[str],
+        allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> dict[str, dict[str, Any]]:
         if not version_ids:
             return {}
@@ -561,7 +665,11 @@ class PersonaRetrievalRepository:
                         == PersonaMemoryEvidenceRecord.document_chunk_id,
                     )
                     .where(
-                        *self._memory_filters(access, persona_id),
+                        *self._memory_filters(
+                            access,
+                            persona_id,
+                            allowed_sensitivities=allowed_sensitivities,
+                        ),
                         PersonaMemoryVersionRecord.id == version_id,
                         SourceDocumentRecord.status == "ready",
                     )
@@ -578,10 +686,12 @@ class PersonaRetrievalRepository:
                     "memory_id": memory.id,
                     "memory_version_id": version.id,
                     "evidence_id": evidence.id,
+                    "evidence_relation": evidence.relation,
                     "source_document_id": source.id,
                     "document_chunk_id": chunk.id,
                     "memory_type": memory.memory_type,
                     "epistemic_status": memory.epistemic_status,
+                    "sensitivity": memory.sensitivity,
                     "summary": version.structured_summary,
                     "excerpt": evidence.excerpt,
                     "locator": evidence.locator_snapshot,
@@ -695,6 +805,10 @@ class PersonaRetrievalRepository:
         query_sha256: str,
         candidates: list[dict[str, Any]],
         top_k: int,
+        model_data_boundary: str,
+        query_embedding_data_boundary: str,
+        allowed_sensitivities: tuple[str, ...],
+        model_evidence_projection: str,
     ) -> dict[str, Any]:
         with self.database.session() as session:
             conversation = self._owned_conversation(
@@ -732,6 +846,12 @@ class PersonaRetrievalRepository:
                     "current_version_only": True,
                     "source_status": "ready",
                     "embedding_space_id": embedding_space_id,
+                    "model_data_boundary": model_data_boundary,
+                    "query_embedding_data_boundary": (
+                        query_embedding_data_boundary
+                    ),
+                    "allowed_sensitivities": list(allowed_sensitivities),
+                    "model_evidence_projection": model_evidence_projection,
                 },
                 candidates=candidates,
                 top_k=top_k,
@@ -1026,13 +1146,21 @@ class PersonaRetrievalRepository:
     def _memory_filters(
         access: AccessContext,
         persona_id: str,
+        *,
+        allowed_sensitivities: tuple[str, ...] | None = None,
     ) -> tuple[Any, ...]:
-        return (
+        filters = (
             PersonaMemoryRecord.owner_id == access.owner_id,
             PersonaMemoryRecord.persona_id == persona_id,
             PersonaMemoryRecord.status == "confirmed",
             PersonaMemoryRecord.visibility == "owner",
             PersonaMemoryRecord.current_version_id == PersonaMemoryVersionRecord.id,
+        )
+        if allowed_sensitivities is None:
+            return filters
+        return (
+            *filters,
+            PersonaMemoryRecord.sensitivity.in_(allowed_sensitivities),
         )
 
     @staticmethod
@@ -1142,8 +1270,14 @@ class PersonaRetrievalRepository:
                 "memory_type": memory.memory_type,
                 "status": memory.status,
                 "epistemic_status": memory.epistemic_status,
+                "sensitivity": memory.sensitivity,
                 "version": version.version,
                 "structured_summary": version.structured_summary,
+            },
+            "evidence": {
+                "id": evidence.id,
+                "relation": evidence.relation,
+                "excerpt_sha256": evidence.excerpt_sha256,
             },
             "source": {
                 "id": source.id,

@@ -1,15 +1,16 @@
 # PersonaOS 数字分身 MVP 实施方案
 
-- 状态：已评审的实施基线；M1、M2 已实现
+- 状态：已评审的实施基线；M1、M2、M3 已实现
 - 日期：2026-07-25
 - 仓库基线：`37daaa3` (`main`)
 - 适用范围：第一阶段“数字员工”向第二阶段“证据驱动的数字分身”演进
 
-> 实施进展（2026-07-25）：仓库版本已进入 `0.8.0`。M1 的审核优先资料入口与
+> 实施进展（2026-07-25）：仓库版本已进入 `0.9.0`。M1 的审核优先资料入口与
 > M2 的 embedding 空间、重向量任务、混合检索、对话、结构化回答、citation
-> 校验和无证据边界均已落地。PostgreSQL/pgvector、API、Worker 的 Compose
-> 基线已交付；它不包含 M4 的 React Web UI。第 2–4 节仍保留审计当时的
-> `0.6.0` 事实快照，避免用后来实现篡改基线。
+> 校验和无证据边界均已落地。M3 已增加确认后版本编辑、记忆关系、敏感等级与
+> 模型数据边界、可校验导出以及记忆/来源的级联删除。PostgreSQL/pgvector、
+> API、Worker 的 Compose 基线已交付；它不包含 M4 的 React Web UI。第 2–4 节
+> 仍保留审计当时的 `0.6.0` 事实快照，避免用后来实现篡改基线。
 
 ## 1. 结论
 
@@ -580,7 +581,7 @@ CI、依赖锁定和发布说明。README 在五分钟内演示完整闭环，�
 每个里程碑独立可运行、可测试、可演示。不得为了后续里程碑提前创建没有行为的
 空目录或大量 TODO。
 
-## 15. M1、M2 实施结果与唯一下一里程碑
+## 15. M1、M2、M3 实施结果与唯一下一里程碑
 
 M1 已按以下边界落地：
 
@@ -605,18 +606,39 @@ M2 在此基础上增加：
 6. 没有证据时返回固定边界响应，模型调用记录为 `skipped`；
 7. 固定评测检查越权召回、embedding 空间串用、悬空引用和无证据边界。
 
+M3 继续完成隐私生命周期：
+
+1. 确认记忆修改要求 `expected_version`，只追加不可变版本；用户改写正文会
+   降格为 `user_asserted`、`source_bound=false`，证据关系改为
+   `derived_from`；
+2. 关系记录支持 supports、conflicts、derived_from、supersedes 与 related_to，
+   并校验 owner、Persona、确认状态和证据版本归属；
+3. Persona 默认只允许 local 模型边界；private network 排除 restricted，
+   external 只允许 public 且启用时要求显式确认；
+4. 模型敏感等级过滤同时进入 embedding 候选、词法、向量和证据查询，边界在
+   RetrievalRun 与 ModelCall 中固化；
+5. 记忆删除清理全部版本、证据、关系与 embedding，并擦除曾使用目标上下文的
+   回答正文和引用；
+6. 来源删除先取消排队中的导入任务，再以 deleting 状态协调 Blob 与数据库；
+   只有全局最后一个 object key 引用删除时才移除加密 Blob；
+7. JSON 导出可选择原始资料，包含证据链和审计但不包含向量数组或内部 object
+   key，并生成 SHA-256 manifest 和导出审计；
+8. 删除审计只保留资源 ID、内容哈希和级联计数，重复请求返回同一墓碑回执。
+
 当前离线 embedding 是可复现的 Unicode 特征哈希，不是高质量语义模型；回答
 生成器只复述证据，不做开放式模型归纳。`source_verified` 仍只表示内容能逐字
 定位回资料，并不证明资料陈述是客观事实。
 
-本轮验证结果为：`47 passed`；新增代码 Ruff 静态检查通过；SQLite migration
-完成 upgrade/check/downgrade；API/Worker 自动化测试完成候选闸门、问答引用和
-重向量任务。执行环境没有 Docker，因此 Compose 只完成配置与安全约束测试，
-真实 PostgreSQL/pgvector 容器查询尚未在本机执行。
+本轮验证结果为：`56 passed`；变更文件 Ruff 静态检查通过；SQLite migration
+完成 upgrade/check/downgrade。端到端测试证明外部生成与外部 embedding 只能
+接收 public 记忆；来源删除后 Blob、chunk、memory/version/evidence、全部
+embedding、citation、词法和向量检索结果均已移除，派生回答已擦除，审计中没有
+原正文。共享 Blob 的最后引用语义、重复删除回执和无向量导出也有自动化覆盖。
+执行环境没有 Docker，因此 Compose 只完成配置与安全约束测试；真实
+PostgreSQL/pgvector 容器查询尚未在本机执行。
 
-唯一下一里程碑是 **M3：记忆管理、冲突和隐私生命周期**。实现确认后版本化
-编辑、来源和记忆删除、派生数据清理、关系图及导出；删除测试必须证明 Blob、
-chunk、embedding 和搜索结果均已移除，审计中不残留正文。
+唯一下一里程碑是 **M4：Web UI 与一键本地演示**。交付人物、资料导入、候选
+审核、记忆版本/关系、问答引用、删除确认和审计页面，并接入现有 Compose。
 
 ## 16. 调研依据
 
@@ -643,3 +665,9 @@ chunk、embedding 和搜索结果均已移除，审计中不残留正文。
 - [Temporal 文档](https://docs.temporal.io/)：长期 durable execution 的后续选项；
 - [OpenTelemetry Python Instrumentation](https://opentelemetry.io/docs/languages/python/instrumentation/)：
   可替换的运行观测接口。
+- [PostgreSQL Constraints](https://www.postgresql.org/docs/current/ddl-constraints.html)：
+  外键、唯一约束与检查约束的数据库级完整性边界；
+- [PostgreSQL BEGIN](https://www.postgresql.org/docs/current/sql-begin.html)：
+  版本切换和关系/索引级联清理使用显式事务保证一致性；
+- [NIST SP 800-88 Rev. 2](https://csrc.nist.gov/pubs/sp/800/88/r2/final)：
+  区分应用层删除回执与存储介质净化，避免把数据库/Blob 删除夸大为物理擦除。

@@ -7,13 +7,17 @@ from core.retrieval.answering import (
     NO_EVIDENCE_ANSWER,
     validate_answer_citations,
 )
-from core.retrieval.models import PersonaAnswerGenerator
+from core.retrieval.models import PersonaAnswerGenerator, RetrievedEvidence
 from core.retrieval.repository import (
     PersonaRetrievalRepository,
     canonical_hash,
 )
 from core.retrieval.service import HybridRetrievalService, MemoryIndexService
 from core.security.access import AccessContext
+from core.security.data_policy import (
+    allowed_sensitivities_for_boundary,
+    require_boundary_allowed,
+)
 
 
 class PersonaQuestionAnsweringService:
@@ -73,6 +77,26 @@ class PersonaQuestionAnsweringService:
         if not 1 <= top_k <= 20:
             raise ValueError("top_k must be between 1 and 20")
 
+        context = self._repository.get_conversation_context(
+            access,
+            conversation_id=conversation_id,
+        )
+        model_data_boundary = self._generator.data_boundary
+        require_boundary_allowed(
+            allowed_boundaries=context["allowed_model_boundaries"],
+            requested_boundary=model_data_boundary,
+        )
+        query_embedding_data_boundary = self._retrieval.data_boundary
+        require_boundary_allowed(
+            allowed_boundaries=context["allowed_model_boundaries"],
+            requested_boundary=query_embedding_data_boundary,
+        )
+        allowed_sensitivities = allowed_sensitivities_for_boundary(
+            model_data_boundary
+        )
+        model_evidence_projection = (
+            "full_evidence" if model_data_boundary == "local" else "memory_only"
+        )
         user_message = self._repository.create_user_message(
             access,
             conversation_id=conversation_id,
@@ -88,6 +112,7 @@ class PersonaQuestionAnsweringService:
             persona_id=persona_id,
             query=normalized,
             top_k=top_k,
+            allowed_sensitivities=allowed_sensitivities,
         )
         trace = [
             {
@@ -113,6 +138,10 @@ class PersonaQuestionAnsweringService:
             query_sha256=query_hash,
             candidates=trace,
             top_k=top_k,
+            model_data_boundary=model_data_boundary,
+            query_embedding_data_boundary=query_embedding_data_boundary,
+            allowed_sensitivities=allowed_sensitivities,
+            model_evidence_projection=model_evidence_projection,
         )
         request_hash = canonical_hash(
             {
@@ -121,6 +150,12 @@ class PersonaQuestionAnsweringService:
                 "memory_version_ids": [item.memory_version_id for item in evidence],
                 "citation_ids": [item.citation_id for item in evidence],
                 "prompt_template_version": "persona-answer-v1",
+                "model_data_boundary": model_data_boundary,
+                "query_embedding_data_boundary": (
+                    query_embedding_data_boundary
+                ),
+                "allowed_sensitivities": allowed_sensitivities,
+                "model_evidence_projection": model_evidence_projection,
             }
         )
 
@@ -136,8 +171,15 @@ class PersonaQuestionAnsweringService:
             started = perf_counter()
             generation = await self._generator.generate(
                 question=normalized,
-                evidence=evidence,
+                evidence=self._evidence_for_model(
+                    evidence,
+                    model_data_boundary=model_data_boundary,
+                ),
             )
+            if generation.data_boundary != model_data_boundary:
+                raise ValueError(
+                    "Answer generator data boundary changed during generation"
+                )
             latency_ms = int((perf_counter() - started) * 1000)
             claim_indexes = validate_answer_citations(
                 generation.draft,
@@ -173,3 +215,25 @@ class PersonaQuestionAnsweringService:
             access,
             message_id=message_id,
         )
+
+    @staticmethod
+    def _evidence_for_model(
+        evidence: list[RetrievedEvidence],
+        *,
+        model_data_boundary: str,
+    ) -> list[RetrievedEvidence]:
+        if model_data_boundary == "local":
+            return evidence
+        return [
+            item.model_copy(
+                update={
+                    "excerpt": "",
+                    "locator": {},
+                    "source": {
+                        "id": item.source_document_id,
+                        "content_withheld": True,
+                    },
+                }
+            )
+            for item in evidence
+        ]

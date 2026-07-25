@@ -456,6 +456,9 @@ class PersonaRecord(Base):
     display_name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     simulation_notice: Mapped[str] = mapped_column(Text, nullable=False)
+    allowed_model_boundaries: Mapped[list[str]] = mapped_column(
+        JSON, default=lambda: ["local"], nullable=False
+    )
     status: Mapped[str] = mapped_column(
         String(40), default="active", index=True, nullable=False
     )
@@ -687,6 +690,51 @@ class PersonaMemoryEvidenceRecord(Base):
     )
     excerpt: Mapped[str] = mapped_column(Text)
     excerpt_sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )
+
+
+class PersonaMemoryRelationRecord(Base):
+    __tablename__ = "persona_memory_relations"
+    __table_args__ = (
+        UniqueConstraint(
+            "from_memory_id",
+            "to_memory_id",
+            "relation",
+            name="uq_persona_memory_relation",
+        ),
+        CheckConstraint(
+            "relation IN ('supports', 'conflicts', 'derived_from', "
+            "'supersedes', 'related_to')",
+            name="ck_persona_memory_relation_type",
+        ),
+        CheckConstraint(
+            "from_memory_id <> to_memory_id",
+            name="ck_persona_memory_relation_not_self",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_persona_memory_relation_confidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    from_memory_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memories.id"), index=True
+    )
+    to_memory_id: Mapped[str] = mapped_column(
+        ForeignKey("persona_memories.id"), index=True
+    )
+    relation: Mapped[str] = mapped_column(String(40), index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    evidence_memory_version_ids: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    created_by_type: Mapped[str] = mapped_column(String(40))
+    created_by_id: Mapped[str] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

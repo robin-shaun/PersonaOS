@@ -328,6 +328,19 @@ if [[ "${RUNTIME_NAME}" == "hermes" ]]; then
     fi
 fi
 
+log "正在检查并升级本地数据库 Schema"
+if ! MIGRATION_MODE="$("${VENV_PYTHON}" -m core.storage.migration_bootstrap)"; then
+    die "数据库 Schema 迁移失败；请先备份数据库并检查 Alembic 输出"
+fi
+if [[ "${MIGRATION_MODE}" == "migrated" ]]; then
+    export DIGITAL_EMPLOYEE_AUTO_CREATE_SCHEMA=false
+    log "数据库已通过 Alembic 升级并校验"
+elif [[ "${MIGRATION_MODE}" == "legacy-create-all" ]]; then
+    log "检测到人物功能前的兼容数据库；保留 create_all 启动模式"
+else
+    die "数据库迁移引导返回未知模式：${MIGRATION_MODE}"
+fi
+
 log "正在启动 API：${API_BASE_URL}"
 "${VENV_PYTHON}" -m apps.api &
 API_PID=$!

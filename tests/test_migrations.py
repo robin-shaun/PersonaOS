@@ -32,6 +32,7 @@ def test_initial_migration_matches_metadata(tmp_path, monkeypatch) -> None:
         "persona_model_calls",
         "persona_memories",
         "persona_memory_evidence",
+        "persona_memory_relations",
         "persona_memory_versions",
         "persona_retrieval_runs",
         "personas",
@@ -41,8 +42,11 @@ def test_initial_migration_matches_metadata(tmp_path, monkeypatch) -> None:
     } <= tables
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0002"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0003"
         )
+    assert "allowed_model_boundaries" in {
+        item["name"] for item in inspector.get_columns("personas")
+    }
 
     command.check(config)
     command.downgrade(config, "base")

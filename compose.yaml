@@ -10,6 +10,7 @@ x-app-environment: &app-environment
   PERSONA_LOCAL_OWNER_ID: local-user
   PERSONA_BLOB_DIR: /app/var/persona/blobs
   PERSONA_BLOB_KEY_PATH: /app/var/persona/blob.key
+  PERSONA_MAX_EXPORT_BYTES: "26214400"
   PERSONA_EMBEDDING_DIMENSIONS: "384"
 
 services:
@@ -30,7 +31,7 @@ services:
     restart: unless-stopped
 
   api:
-    image: personaos:0.8.0
+    image: personaos:0.9.0
     build:
       context: .
     environment: *app-environment
@@ -61,7 +62,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: personaos:0.8.0
+    image: personaos:0.9.0
     build:
       context: .
     environment: *app-environment

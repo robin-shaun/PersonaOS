@@ -3,9 +3,9 @@
 一个本地优先、证据驱动、人工审核优先的开源数字员工与数字分身系统。
 
 PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选、人工确认版本和
-原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.8.0` 已
-跑通 M2：“创建人物 → 导入文本 → 生成候选 → 人工确认 → 混合检索 → 带原始
-来源引用的问答”。Web 管理端与记忆隐私生命周期仍在后续里程碑。
+原始来源分开保存，使每条长期记忆都可以追溯、审核和纠正。当前 `0.9.0` 已
+跑通 M3：“创建人物 → 导入文本 → 人工确认 → 混合检索与引用问答 → 版本化
+修改、关系、导出或可证明删除”。专用 Web 管理端仍在后续里程碑。
 
 仓库也保留原有的 GitHub 项目维护数字员工：它只读取公共或已授权仓库，生成
 项目简报与 Issue 优先级建议，不修改 Issue、评论、PR 或 Release。建议必须
@@ -80,7 +80,10 @@ down -v` 会永久删除这些本地数据，不应用作普通停止命令。
 ~~~
 
 第一次运行会自动创建 `.env` 和 `.venv`、安装运行依赖，然后在同一终端启动
-API 与 Worker。API 默认监听 `127.0.0.1:18110`。
+API 与 Worker。启动前会对全新、已版本化或可明确识别的 M1/M2 SQLite 执行
+Alembic 升级和 schema check；无法明确识别的部分迁移人物库会拒绝猜测。API
+默认监听 `127.0.0.1:18110`。包含真实资料的数据库在首次跨版本启动前仍应先
+备份数据库文件、Blob 目录和密钥。
 打开 http://127.0.0.1:18110/docs 查看交互式 API，按 `Ctrl+C` 会统一停止
 本脚本启动的所有进程。依赖更新后可以强制重新安装：
 
@@ -95,15 +98,17 @@ API 与 Worker。API 默认监听 `127.0.0.1:18110`。
 .venv/bin/python -m apps.worker.run
 ~~~
 
-API 与 Worker 就绪后，可以运行不调用模型或付费服务的 M2 演示：
+API 与 Worker 就绪后，可以运行不调用模型或付费服务的 M3 演示：
 
 ~~~bash
 .venv/bin/python examples/persona_memory_demo.py
 ~~~
 
 脚本导入 `examples/data/demo-journal.md`，等待 Worker 处理，确认第一条候选，
-创建会话并提问，最后输出人物免责声明、回答、确认版本、原始文件定位、引用
-摘录、embedding space 和审计动作。其他候选仍保持 `candidate`。
+追加一个敏感等级版本，创建会话并提问，再生成不含原文的 JSON 导出清单。最后
+输出人物免责声明、回答、版本、来源定位、embedding space、导出哈希和审计动作。
+其他候选仍保持 `candidate`。对这个脚本新建的资料执行完整删除证明可追加
+`--delete-source`；该选项会永久删除 Blob、chunk、记忆、向量和回答引用。
 
 Worker 默认给每次执行 300 秒硬超时，并每 0.25 秒检查一次主动取消请求。
 可以通过 `DIGITAL_EMPLOYEE_WORKER_TASK_TIMEOUT_SECONDS` 和
@@ -305,14 +310,22 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | GET | /health | 运行状态、安全模式与队列计数 |
 | POST | /api/v1/personas | 创建本地所有者的人物档案 |
 | GET | /api/v1/personas | 查看人物档案 |
+| PATCH | /api/v1/personas/{id}/model-policy | 授权本地、私网或外部模型数据边界 |
 | POST | /api/v1/personas/{id}/documents | 导入 UTF-8 文本或 Markdown |
 | GET | /api/v1/personas/{id}/documents | 查看资料及处理状态 |
 | GET | /api/v1/documents/{id} | 查看资料和稳定分块定位 |
+| DELETE | /api/v1/documents/{id}?confirm=true | 删除来源及依赖图并按引用计数清理 Blob |
 | GET | /api/v1/personas/{id}/memory-candidates | 查看带来源的待审核候选 |
 | POST | /api/v1/memory-candidates/{id}/review | 确认、修订确认或拒绝候选 |
 | GET | /api/v1/personas/{id}/memories | 按状态查看人物记忆 |
 | GET | /api/v1/memories/{id} | 查看当前版本与原始来源证据 |
+| PATCH | /api/v1/memories/{id} | 以乐观锁追加确认记忆版本或修改敏感等级 |
+| DELETE | /api/v1/memories/{id}?confirm=true | 删除记忆、索引、引用及依赖回答 |
+| POST | /api/v1/personas/{id}/memory-relations | 建立支持、冲突、派生等记忆关系 |
+| GET | /api/v1/memories/{id}/relations | 查看一条记忆的入边与出边 |
+| DELETE | /api/v1/memory-relations/{id}?confirm=true | 删除记忆关系 |
 | GET | /api/v1/personas/{id}/audit-events | 查看人物重要操作审计 |
+| POST | /api/v1/personas/{id}/export | 导出可校验 JSON 快照，可选原始资料 |
 | POST | /api/v1/personas/{id}/conversations | 创建绑定人物和所有者的会话 |
 | GET | /api/v1/conversations/{id}/messages | 查看会话消息 |
 | POST | /api/v1/conversations/{id}/messages | 混合检索并生成带引用回答 |
@@ -351,13 +364,13 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
       agents/              Employee Definition 与 AgentRuntime
       ingestion/           可复现切分和可替换候选提取器
       retrieval/           Embedding 空间、混合召回、回答与引用校验
-      security/            请求外部的所有者/操作者上下文
+      security/            所有者上下文、模型数据边界与敏感等级策略
       skills/              Skill 注册和权限检查
       workflows/           重试、条件、暂停与检查点
       evaluation/          事实引用与交付质量检查
       identity/            偏好证据提取与 Personal Context 接口
       services/            项目维护、人物资料导入和审批流程
-      storage/             SQLAlchemy、人物证据库和加密 BlobStore
+      storage/             SQLAlchemy、证据库、生命周期事务和加密 BlobStore
     adapters/
       github/              GitHub App 鉴权与只读 REST 适配器
       runtime/             可离线验证的规则运行时
@@ -372,7 +385,8 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
 
 当前数字员工设计与安全边界见 [docs/architecture.md](docs/architecture.md)。
 向证据驱动数字分身演进的仓库审计、架构取舍和分阶段验收标准见
-[docs/persona-mvp-plan.md](docs/persona-mvp-plan.md)。
+[docs/persona-mvp-plan.md](docs/persona-mvp-plan.md)。版本、模型边界和删除语义
+记录在 [ADR 0001](docs/adr/0001-memory-privacy-lifecycle.md)。
 
 ## 测试
 
@@ -391,8 +405,10 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
 
 ## 当前边界
 
-- Compose 使用 PostgreSQL/pgvector 和 Alembic；`start.sh` 为轻量兼容仍使用
-  SQLite 与自动建表。已有未版本化 SQLite 数据库还没有自动迁移路径。
+- Compose 使用 PostgreSQL/pgvector 和 Alembic；`start.sh` 默认使用 SQLite，
+  会升级新库、Alembic 库以及可明确识别的未版本化 M1/M2 人物库。人物功能前的
+  旧库仍保留 `create_all` 兼容模式；部分迁移或无法识别的人物库要求先备份并
+  人工处理，启动器不会盲目 stamp。
 - 队列是“至少一次”执行语义，有租约、幂等键、主动取消和超时；PostgreSQL
   使用行锁跳过已领取任务，但尚未做高并发压测。
 - 人物 API 当前只有服务端配置的单一本地所有者，没有登录、会话或多租户认证。
@@ -402,13 +418,25 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
 - 当前提取器按可复现文本块生成候选并做粗粒度类型规则，不是完整的事实抽取或
   语义归纳。`source_verified` 表示可验证地来自该资料，不表示客观世界事实。
 - 只有 `confirmed` 当前版本会进入索引；检索在 owner/persona/status/visibility
-  硬过滤后合并词法和向量排名。候选、拒绝和旧版本不会进入回答上下文。
+  以及模型边界允许的 sensitivity 硬过滤后合并词法和向量排名。候选、拒绝和
+  旧版本不会进入回答上下文。
 - 离线 embedding 是 Unicode 特征哈希基线，能验证空间隔离和完整链路，但不等同
   于高质量语义模型。切换模型/维度会创建新空间，必须显式执行重向量任务。
-- 人物回答默认仅复述证据，不是通用 LLM 综合回答。生成器接口和模型调用记录已
-  隔离，但外部/本地模型适配器及其数据边界授权尚未实现。
-- 人物记忆目前支持查看、确认、修订后确认、拒绝和重新向量化，尚不支持确认后
-  编辑、删除、冲突关系或导出。
+- 人物回答默认仅复述证据，不是通用 LLM 综合回答。生成器和 embedding provider
+  会在调用前声明 `local`、`private_network` 或 `external` 边界；人物默认只
+  允许 `local`，启用 `external` 必须显式确认，且外部边界只可收到 `public`
+  记忆的摘要与 citation ID，不会收到原始 evidence excerpt、文件信息和 locator。
+  真正的云端/本地模型适配器仍未实现。
+- 确认后编辑采用追加版本和 `expected_version` 乐观锁。用户改写正文后，新版本
+  标记为 `user_asserted`、`source_bound=false`；原资料只保留为派生依据，不能
+  被重新标成直接验证事实。
+- 记忆和资料删除是应用层级联删除：会清理引用、向量和派生回答，并只留下不含
+  正文的审计墓碑。它不等同于 SSD、对象存储历史版本或备份介质的物理净化；
+  生产环境仍需独立的备份保留与介质销毁策略。
+- 当前 JSON 导出在 API 进程内缓冲，默认上限 25 MiB；不导出向量数组，只导出
+  embedding 空间和内容哈希元数据。大规模流式归档尚未实现。
+- Blob 引用检查和上传/删除在单 API 进程内加锁。多 API 副本需要数据库级对象
+  引用租约或独立对象存储协调器后，才可安全并发执行来源删除。
 - Docker Compose 已覆盖数据库、API 和 Worker；专用 Web UI 尚未实现，当前用
   `/docs` 与演示脚本操作。本环境没有 Docker 时仍可用 SQLite 跑测试和主机演示。
 - Skill 定义已声明输入/输出、权限、工具、超时、重试、风险、确认、测试、示例
@@ -424,6 +452,5 @@ DIGITAL_EMPLOYEE_DATABASE_URL=sqlite:///./var/migration-check.db \
 - 取消接口中的 requested_by 当前只是审计标签；接入身份认证前不能作为可信身份。
 - 没有任何 GitHub 写能力。后续增加写操作时必须使用独立权限和二次审批。
 
-唯一下一里程碑是 M3：实现确认记忆的版本化编辑、删除与派生清理、来源删除、
-支持/冲突/派生关系和可验证导出，并用测试证明删除后 Blob、chunk、embedding
-和检索结果均不可恢复，同时审计记录不保留正文。
+唯一下一里程碑是 M4：交付 React 管理端，覆盖人物、资料导入、候选审核、记忆
+版本与关系、问答引用、删除确认和审计，并把它接入现有 Compose 的本地演示。
