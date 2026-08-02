@@ -31,6 +31,7 @@ PersonaOS `0.12.0` 有两个相互隔离但复用同一运行底座的产品闭�
                     │
                     ▼
     PostgreSQL transaction-local owner GUC
+      ├── ordinary transaction → SET LOCAL ROLE personaos_runtime
       ├── direct owner USING + WITH CHECK policies
       ├── child-row policies through owned parents
       ├── FORCE ROW LEVEL SECURITY
@@ -45,10 +46,12 @@ bearer token。登录、再认证、失败、拒绝和注销写入独立 `auth_e
 `428`，且不会自动执行原动作。当前高风险集合包括删除资料/记忆、含解密原文的
 导出、允许 external 模型、断开 GitHub 连接和创建账户。
 
-RLS 的 system bypass 是应用在 transaction-local GUC 中显式设置的能力，所有
-使用点可以通过 `session(system=True)` 搜索。Compose 当前迁移与运行仍共用数据库
-角色，因此 RLS 用于捕获仓储漏过滤，而不是抵御数据库凭据失守或任意 SQL。
-SQLite 没有 RLS，只执行同一套应用层双账户测试。完整取舍见
+普通事务先切换到不可登录、无 `BYPASSRLS` 的 `personaos_runtime`，再设置
+transaction-local owner GUC；这使 Compose 的 schema-owner 登录连接也必须执行
+policy。system bypass 仍是应用显式设置的能力，所有使用点可通过
+`session(system=True)` 搜索。Compose 迁移与服务仍共用登录凭据，因此 RLS 用于
+捕获仓储漏过滤，而不是抵御数据库凭据失守或任意 SQL。SQLite 没有 RLS，只执行
+同一套应用层双账户测试。完整取舍见
 [ADR 0004](adr/0004-trusted-local-accounts.md)。
 
 ## 人物资料证据链

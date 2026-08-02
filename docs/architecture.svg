@@ -146,7 +146,7 @@
     <rect x="52" y="774" width="488" height="106" rx="16" fill="#173d34"/>
     <text class="box-title" x="78" y="808" style="fill:#ffffff">PostgreSQL 17 + pgvector</text>
     <text class="box-copy" x="78" y="833" style="fill:#d5e8e2">结构化领域记录 · 全文索引 · embedding 空间</text>
-    <text class="box-copy" x="78" y="854" style="fill:#d5e8e2">Alembic · FORCE RLS · owner/persona/敏感等级过滤</text>
+    <text class="box-copy" x="78" y="854" style="fill:#d5e8e2">Alembic · 受限 runtime role · FORCE RLS · owner 过滤</text>
 
     <rect x="570" y="774" width="350" height="106" rx="16" fill="#173d34"/>
     <text class="box-title" x="596" y="808" style="fill:#ffffff">Encrypted BlobStore</text>

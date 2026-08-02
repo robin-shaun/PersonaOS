@@ -21,10 +21,11 @@ Swagger UI 位于 `/docs`，运行时 schema 位于 `/openapi.json`；仓库同�
 使用 `HttpOnly` 和 `SameSite=Strict`，HTTPS 部署还必须配置
 `PERSONA_COOKIE_SECURE=true`。
 
-PostgreSQL 在应用层过滤之外强制 owner RLS；SQLite 不支持 RLS，只用于本机开发
-和相同的应用隔离测试。0.12 仍是回环地址上的本地账户系统，没有 MFA、自助恢复、
-集中限流、独立数据库角色或公网生产部署基线，不要把它直接暴露到公网或不可信
-局域网。
+PostgreSQL 在应用层过滤之外强制 owner RLS，普通事务会切换到不可登录且不能
+绕过 RLS 的运行时角色；SQLite 不支持 RLS，只用于本机开发和相同的应用隔离
+测试。0.12 仍是回环地址上的本地账户系统，没有 MFA、自助恢复、集中限流、独立
+migration/runtime 登录凭据或公网生产部署基线，不要把它直接暴露到公网或
+不可信局域网。
 
 调用人物端点时可以发送最多 100 个字符的 `X-Request-ID`。服务会把它写入相关
 审计事件，便于把用户操作和证据链关联起来；包含换行、制表符或过长的值会返回

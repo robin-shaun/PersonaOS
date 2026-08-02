@@ -10,6 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 from core.storage.models import Base
 
+POSTGRES_RUNTIME_ROLE = "personaos_runtime"
+
 
 class Database:
     def __init__(self, url: str) -> None:
@@ -63,6 +65,14 @@ class Database:
         session = self._session_factory()
         try:
             if self.engine.dialect.name == "postgresql":
+                if not system:
+                    # The Compose login owns the schema and is therefore also the
+                    # migration/system identity. Drop to a fixed NOLOGIN,
+                    # NOBYPASSRLS role before every ordinary transaction so a
+                    # privileged connection cannot silently bypass row policies.
+                    session.execute(
+                        text(f'SET LOCAL ROLE "{POSTGRES_RUNTIME_ROLE}"')
+                    )
                 session.execute(
                     text(
                         "SELECT "

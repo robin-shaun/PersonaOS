@@ -13,7 +13,8 @@
 - 写请求 CSRF/Origin 校验和删除、原文导出、external 边界、断开连接、创建账户
   的近期再认证；
 - React 登录/初始化门、账户与会话页、管理员创建账户和再认证对话框；
-- PostgreSQL 全人物领域 `ENABLE` + `FORCE ROW LEVEL SECURITY` policy；
+- PostgreSQL 全人物领域 `ENABLE` + `FORCE ROW LEVEL SECURITY` policy，以及普通
+  事务专用的 `NOLOGIN`、`NOBYPASSRLS` 运行时角色；
 - 0.11 legacy owner 的 dry-run、显式 apply、精确回执和原子 rollback CLI；
 - 双账户完整证据闭环、越权矩阵、会话/CSRF/锁定/迁移测试，以及 Compose
   Web-origin 与数据库级 RLS smoke。
@@ -39,8 +40,8 @@
 ### Known limitations
 
 - 没有 MFA、WebAuthn、账户恢复、账户停用/密码修改 UI、集中限流或独立安全审计；
-- Compose migration/runtime 共用数据库角色，system GUC 不是对数据库凭据失守的
-  防御；
+- Compose migration/runtime 仍共用登录凭据；普通事务虽会降权到受限角色，
+  system GUC 仍不是对数据库凭据失守或任意 SQL 的防御；
 - SQLite 没有 RLS，只覆盖应用层隔离；高对抗部署仍需独立角色和外部秘密管理。
 
 ## 0.11.0 - 2026-07-25

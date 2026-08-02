@@ -7,11 +7,11 @@ import json
 import sys
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from core.config import Settings
-from core.storage.database import Database
+from core.storage.database import POSTGRES_RUNTIME_ROLE, Database
 from core.storage.models import (
     AnswerCitationRecord,
     ConversationMessageRecord,
@@ -53,6 +53,7 @@ def run(owner_a_username: str, owner_b_username: str) -> dict[str, object]:
     owner_b = account_id(database, owner_b_username)
 
     with database.session(system=True) as session:
+        system_role = session.scalar(text("SELECT current_user"))
         all_rows = list(
             session.scalars(
                 select(PersonaRecord).order_by(PersonaRecord.id)
@@ -78,6 +79,7 @@ def run(owner_a_username: str, owner_b_username: str) -> dict[str, object]:
     message_owners = {item.id: item.owner_id for item in all_messages}
 
     with database.session(owner_id=owner_a) as session:
+        owner_role = session.scalar(text("SELECT current_user"))
         owner_a_rows = list(session.scalars(select(PersonaRecord)))
         owner_a_tasks = list(session.scalars(select(TaskRecord)))
         owner_a_documents = list(
@@ -97,6 +99,14 @@ def run(owner_a_username: str, owner_b_username: str) -> dict[str, object]:
     require(
         owner_a_rows and all(item.owner_id == owner_a for item in owner_a_rows),
         "owner scope returned another account's row",
+    )
+    require(
+        owner_role == POSTGRES_RUNTIME_ROLE,
+        "owner transaction did not assume the constrained runtime role",
+    )
+    require(
+        system_role != POSTGRES_RUNTIME_ROLE,
+        "system transaction unexpectedly assumed the runtime role",
     )
     require(hidden is None, "primary-key lookup crossed RLS")
     require(cross_update_rowcount == 0, "cross-owner update crossed RLS")
@@ -137,6 +147,7 @@ def run(owner_a_username: str, owner_b_username: str) -> dict[str, object]:
     )
 
     with database.session() as session:
+        unscoped_role = session.scalar(text("SELECT current_user"))
         unscoped_counts = {
             "personas": len(
                 list(session.scalars(select(PersonaRecord.id)))
@@ -152,6 +163,10 @@ def run(owner_a_username: str, owner_b_username: str) -> dict[str, object]:
     require(
         all(value == 0 for value in unscoped_counts.values()),
         "unscoped transaction did not default deny",
+    )
+    require(
+        unscoped_role == POSTGRES_RUNTIME_ROLE,
+        "unscoped transaction did not assume the constrained runtime role",
     )
 
     insert_sqlstate = ""
@@ -179,6 +194,8 @@ def run(owner_a_username: str, owner_b_username: str) -> dict[str, object]:
 
     return {
         "dialect": database.engine.dialect.name,
+        "owner_role": owner_role,
+        "system_role": system_role,
         "system_persona_count": len(all_rows),
         "owner_a_visible_count": len(owner_a_rows),
         "owner_a_task_count": len(owner_a_tasks),

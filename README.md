@@ -135,7 +135,7 @@ down -v` 会永久删除这些本地数据，不应用作普通停止命令。
 
 第一次运行会自动创建 `.env` 和 `.venv`、安装运行依赖，然后在同一终端启动
 API 与 Worker。依赖从带 SHA-256 的 `requirements.lock` 安装。启动前会对
-全新、已版本化或可明确识别的 Alembic 0001–0004 SQLite 执行
+全新、已版本化或可明确识别的 Alembic 0001–0005 SQLite 执行
 Alembic 升级和 schema check；无法明确识别的部分迁移人物库会拒绝猜测。API
 默认监听 `127.0.0.1:18110`。包含真实资料的数据库在首次跨版本启动前仍应先
 备份数据库文件、Blob 目录和密钥。
@@ -581,7 +581,7 @@ Nginx 的真实 Compose smoke，并在结束时删除专用 CI volume。
 ## 当前边界
 
 - Compose 使用 PostgreSQL/pgvector 和 Alembic；`start.sh` 默认使用 SQLite，
-  会升级新库、Alembic 库以及可明确识别的未版本化 0001–0004 人物库。人物功能前的
+  会升级新库、Alembic 库以及可明确识别的未版本化 0001–0005 人物库。人物功能前的
   旧库仍保留 `create_all` 兼容模式；部分迁移或无法识别的人物库要求先备份并
   人工处理，启动器不会盲目 stamp。
 - 队列是“至少一次”执行语义，有租约、幂等键、主动取消和超时；PostgreSQL
@@ -589,8 +589,9 @@ Nginx 的真实 Compose smoke，并在结束时删除专用 CI volume。
 - API 从 Argon2id 本地账户和可撤销服务端会话签发可信 actor，Cookie 为
   HttpOnly/SameSite=Strict，写请求同时检查 CSRF 和 Origin；PostgreSQL 使用
   `FORCE ROW LEVEL SECURITY` 作为应用 owner 过滤的第二道边界。SQLite 没有
-  RLS，只适合本机开发和应用隔离测试。当前仍无 MFA、账户恢复、集中速率限制、
-  独立 migration/runtime 数据库角色或公网生产身份基线。
+  RLS；普通事务会降权到不可登录、不能绕过 RLS 的 `personaos_runtime` 角色。
+  SQLite 只适合本机开发和应用隔离测试。当前仍无 MFA、账户恢复、集中速率限制、
+  独立 migration/runtime 登录凭据或公网生产身份基线。
 - 原始上传 Blob 使用 AES-256-GCM 加密；用于审核和后续检索的 chunk、候选内容
   与引用摘录仍以数据库可读字段保存。生产部署仍需要主机/卷加密和备份保护。
 - 当前提取器按可复现文本块生成候选并做粗粒度类型规则，不是完整的事实抽取或

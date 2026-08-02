@@ -7,6 +7,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
+from core.storage.database import POSTGRES_RUNTIME_ROLE
 from core.storage.models import Base
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +37,20 @@ def test_every_owner_sensitive_table_has_a_row_security_policy() -> None:
         protected_tables | deliberately_global_tables
     )
     assert not protected_tables & deliberately_global_tables
+
+
+def test_postgresql_runtime_role_covers_every_application_table() -> None:
+    migration = run_path(
+        str(
+            PROJECT_ROOT
+            / "migrations"
+            / "versions"
+            / "0005_postgresql_runtime_role.py"
+        )
+    )
+
+    assert set(migration["_RUNTIME_TABLES"]) == set(Base.metadata.tables)
+    assert migration["POSTGRES_RUNTIME_ROLE"] == POSTGRES_RUNTIME_ROLE
 
 
 def test_initial_migration_matches_metadata(tmp_path, monkeypatch) -> None:
@@ -74,7 +89,7 @@ def test_initial_migration_matches_metadata(tmp_path, monkeypatch) -> None:
     } <= tables
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
         )
     assert "allowed_model_boundaries" in {
         item["name"] for item in inspector.get_columns("personas")

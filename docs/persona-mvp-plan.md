@@ -684,8 +684,9 @@ M6 把固定演示 principal 升级为可信本地账户边界：
    均从服务端认证上下文派生；
 5. API 可达的人物、资料、记忆、任务、会话、citation、连接、导出和审计均在
    repository/service 层按 owner 约束，越权资源统一表现为不存在；
-6. PostgreSQL 对直接或间接携带人物归属的业务表启用并强制 RLS，事务只通过
-   owner 或显式 system scope 设置本地 GUC；SQLite 仅保留开发测试兼容；
+6. PostgreSQL 对直接或间接携带人物归属的业务表启用并强制 RLS，普通事务先降权
+   到 `NOLOGIN`/`NOBYPASSRLS` 角色，再通过 owner GUC 进入人物作用域；只有显式
+   system scope 保留系统权限，SQLite 仅保留开发测试兼容；
 7. 两账户自动化用例分别完成资料导入、候选确认、索引、问答、citation 和原文
    导出，并对全部关键资源做双向跨 owner 探测；
 8. 0.11 `local-user` 数据迁移先预览计数、唯一键冲突和非终态任务，再按精确主键

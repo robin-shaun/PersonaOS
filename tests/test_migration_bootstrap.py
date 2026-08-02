@@ -28,7 +28,7 @@ def test_startup_bootstrap_migrates_a_fresh_database(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
         )
     assert "persona_memory_relations" in inspect(engine).get_table_names()
     engine.dispose()
@@ -84,7 +84,7 @@ def test_startup_bootstrap_recognizes_unversioned_m2_and_upgrades(
     assert "allowed_model_boundaries" in columns
     with engine.connect() as connection:
         assert (
-            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0004"
+            connection.scalar(text("SELECT version_num FROM alembic_version")) == "0005"
         )
         policy = connection.scalar(
             text(
@@ -165,7 +165,7 @@ def test_startup_bootstrap_recognizes_unversioned_current_schema(
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0004"
+            == "0005"
         )
         assert (
             connection.scalar(

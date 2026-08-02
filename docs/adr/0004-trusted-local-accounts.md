@@ -93,20 +93,25 @@ FastAPI 中间件对 `/api/v1/*` 默认拒绝，只有健康检查、OpenAPI 和
 跨账户资源统一表现为 404，避免资源枚举。PostgreSQL 对直接或间接属于账户的表
 启用并强制 Row-Level Security：
 
-- 事务开始时通过 `set_config(..., true)` 设置 `personaos.owner_id`；
+- 普通事务先 `SET LOCAL ROLE personaos_runtime`，该固定角色不可登录、不是
+  superuser 且没有 `BYPASSRLS`，再通过 `set_config(..., true)` 设置 owner；
 - policy 的 `USING` 与 `WITH CHECK` 同时限制读、写、更新和删除；
 - 未设置 owner 的普通事务默认看不到任何账户行；
 - Worker 队列领取、认证查找、管理员账户管理和显式迁移使用单独标记的系统事务，
   每个使用点都必须在代码中可搜索和审计。
 
-PostgreSQL 文档说明 RLS 在没有适用 policy 时默认拒绝，且表所有者通常绕过
-policy，因此迁移必须同时执行 `ENABLE` 与 `FORCE ROW LEVEL SECURITY`：
-[Row Security Policies](https://www.postgresql.org/docs/17/ddl-rowsecurity.html)。
+PostgreSQL 文档说明 superuser 和 `BYPASSRLS` 角色总会绕过 policy，表所有者
+通常也会绕过，因此只有 `ENABLE` + `FORCE ROW LEVEL SECURITY` 仍不足以约束
+Compose 初始化产生的超级用户。迁移额外创建固定 `NOLOGIN`、`NOSUPERUSER`、
+`NOBYPASSRLS` 角色并只授予应用表 DML；普通事务通过 `SET LOCAL ROLE` 让权限
+检查以该角色执行：
+[Row Security Policies](https://www.postgresql.org/docs/17/ddl-rowsecurity.html)、
+[SET ROLE](https://www.postgresql.org/docs/17/sql-set-role.html)。
 
-当前 Compose 仍由同一个数据库角色执行迁移和运行服务，系统事务 GUC 也由应用
-设置；因此 RLS 的定位是防止仓储遗漏和跨 owner 查询，而不是抵御数据库凭据已
-失守或任意 SQL 执行。公网/高对抗部署仍需独立 migration/runtime 角色和外部
-秘密管理。
+Compose 迁移与运行服务仍共用登录凭据，系统事务 GUC 也由应用设置；受限角色能
+防止普通仓储遗漏和跨 owner 查询，却不抵御数据库凭据失守、任意 SQL 或恶意
+`system=True` 调用。公网/高对抗部署仍需独立 migration/runtime 登录凭据和外部
+秘密管理。升级迁移需要具备创建该集群角色的权限。
 
 SQLite 不支持 RLS，只运行相同的应用层隔离测试；真实隔离验收必须包含
 PostgreSQL Compose。
