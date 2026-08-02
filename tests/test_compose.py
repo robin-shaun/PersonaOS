@@ -22,7 +22,9 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     assert services["api"]["image"] == "personaos:0.12.0"
     assert services["worker"]["image"] == services["api"]["image"]
     assert services["web"]["image"] == "personaos-web:0.12.0"
-    assert services["web"]["ports"] == ["127.0.0.1:18111:8080"]
+    assert services["web"]["ports"] == [
+        "${PERSONAOS_WEB_BIND_HOST:-127.0.0.1}:18111:8080"
+    ]
     assert services["web"]["build"]["dockerfile"] == "apps/web/Dockerfile"
     assert "alembic upgrade head" in services["api"]["command"][-1]
     assert (

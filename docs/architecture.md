@@ -193,8 +193,9 @@ FastAPI 的可信会话、owner、版本、权限、确认和审计边界执行�
 生产构建由 Vite 生成静态资产，非 root Nginx 提供页面并做同源反向代理。浏览器
 只持有 HttpOnly Cookie 和内存态 CSRF，不把密码、Cookie、CSRF、模型或数据库
 密钥写入 localStorage；也不直接连接 PostgreSQL/Worker。API 继续单独映射
-`127.0.0.1:18110`，Web 映射 `127.0.0.1:18111`。本地认证不等于公网生产基线，
-两者仍不能直接代理到公网。
+`127.0.0.1:18110`；Web 默认映射 `127.0.0.1:18111`，并可通过显式设置
+`PERSONAOS_WEB_BIND_HOST` 绑定到可信局域网接口供手机访问。该选项不改变本地
+HTTP 的安全边界，也不允许直接代理到公网。
 
 同源方式避免为本地管理端打开宽泛 CORS。Nginx 设置 CSP、`frame-ancestors
 'none'`、`X-Frame-Options: DENY`、`nosniff`、`no-referrer`，并禁用浏览器摄像头、
@@ -360,7 +361,8 @@ AgentRuntime 或业务 Workflow 的调用边界。
 ## 安全约束
 
 - API 使用可信本地会话、CSRF/Origin、应用 owner 过滤和 PostgreSQL FORCE RLS；
-  Compose 仍只映射到 `127.0.0.1`，本地单因素认证不允许直接暴露到不可信网络。
+  Compose 默认只映射到 `127.0.0.1`；Web 可显式绑定可信局域网接口，但本地
+  单因素认证和明文 HTTP 不允许直接暴露到不可信网络。
 - 原始资料只接受限定大小的 UTF-8 `.txt`/`.md`，按 SHA-256 寻址并用
   AES-256-GCM 加密；密钥来自环境、密钥文件或首次启动生成的 0600 文件。
 - Blob object key 有固定格式和根目录约束，读取时同时验证 AEAD tag 与内容哈希。

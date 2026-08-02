@@ -85,7 +85,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     ports:
-      - "127.0.0.1:18111:8080"
+      - "${PERSONAOS_WEB_BIND_HOST:-127.0.0.1}:18111:8080"
     depends_on:
       api:
         condition: service_healthy

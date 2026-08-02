@@ -112,12 +112,31 @@ http://127.0.0.1:18111，使用该账户登录，然后完成：
 演示不需要 API Key，不调用付费模型，也不会自动确认候选。FastAPI 交互文档位于
 http://127.0.0.1:18110/docs。
 
-Web 与 API 都只映射到本机回环地址；Compose 会先执行 Alembic migration，并让
+Web 与 API 默认都只映射到本机回环地址；Compose 会先执行 Alembic migration，并让
 API 与 Worker 共享独立的认证/Blob 密钥卷。CI 在一次性空 volume 中创建两个
 测试账户，再运行 `examples/compose_smoke.py`：两个账户各自完成完整证据闭环，
 并双向探测人物、资料、记忆、任务、引用、导出和删除；随后
 `examples/postgres_rls_smoke.py` 直接验证 PostgreSQL 默认拒绝、跨 owner
 读写和系统事务。脚本密码只从环境读取，具体可复现命令见 CI workflow。
+
+### 手机浏览（同一可信 Wi-Fi）
+
+生产 Web 已适配手机宽度和触控操作。先查询电脑的局域网 IPv4 地址（通常形如
+`192.168.1.23`），再只把 Web 入口绑定到该地址；API 的 18110 端口仍保持仅本机
+可达，手机通过 Web 的同源反向代理调用它：
+
+~~~bash
+PERSONAOS_WEB_BIND_HOST=192.168.1.23 \
+  docker compose up --build --detach --wait
+~~~
+
+把示例地址替换为电脑的真实地址，然后让手机连接同一 Wi-Fi，并打开
+`http://192.168.1.23:18111`。如果操作系统防火墙拦截连接，只需允许可信局域网
+访问 TCP 18111；不要开放 18110。也可以在 `.env` 中持久设置
+`PERSONAOS_WEB_BIND_HOST`。这仍是明文 HTTP 的本地演示入口，只应用于可信网络
+和非敏感演示资料，不能做路由器端口转发或直接暴露公网；异地访问应使用带 TLS
+和访问控制的正式部署或安全隧道。
+
 停止服务：
 
 ~~~bash

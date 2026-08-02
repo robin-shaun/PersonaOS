@@ -2884,7 +2884,11 @@ textarea::placeholder {
     width: 100%;
     height: auto;
     top: 0;
-    padding: 10px 12px;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      10px
+      max(12px, env(safe-area-inset-left));
     flex-direction: row;
     gap: 10px;
     align-items: center;
@@ -2988,6 +2992,22 @@ textarea::placeholder {
 
   .auth-intro .logo-mark {
     margin-bottom: 20px;
+  }
+
+  .button,
+  input,
+  select {
+    min-height: 44px;
+  }
+
+  .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .sidebar nav button {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .account-row {
