@@ -8,6 +8,7 @@ from alembic import command
 from alembic.config import Config
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.engine import make_url
 
 from core.config import Settings
 
@@ -59,6 +60,7 @@ def prepare_startup_database(
     unambiguous; Alembic check then verifies the complete resulting metadata.
     """
 
+    _ensure_sqlite_parent(settings.database_url)
     engine = create_engine(settings.database_url)
     try:
         inspector = inspect(engine)
@@ -89,6 +91,25 @@ def prepare_startup_database(
     return "migrated"
 
 
+def _ensure_sqlite_parent(database_url: str) -> None:
+    """Create the local database directory before SQLite opens a fresh file."""
+
+    url = make_url(database_url)
+    database = url.database
+    if (
+        url.get_backend_name() != "sqlite"
+        or not database
+        or database == ":memory:"
+        or database.startswith("file:")
+    ):
+        return
+    Path(database).expanduser().resolve().parent.mkdir(
+        mode=0o700,
+        parents=True,
+        exist_ok=True,
+    )
+
+
 def _recognized_persona_revision(inspector, tables: set[str]) -> str:
     if not _M1_PERSONA_TABLES <= tables:
         raise RuntimeError(
@@ -109,9 +130,7 @@ def _recognized_persona_revision(inspector, tables: set[str]) -> str:
     has_relations = "persona_memory_relations" in tables
     if has_policy and has_relations:
         present_auth_tables = tables & _M4_AUTH_TABLES
-        user_columns = {
-            item["name"] for item in inspector.get_columns("users")
-        }
+        user_columns = {item["name"] for item in inspector.get_columns("users")}
         present_auth_columns = user_columns & _M4_USER_COLUMNS
         if (
             present_auth_tables == _M4_AUTH_TABLES
