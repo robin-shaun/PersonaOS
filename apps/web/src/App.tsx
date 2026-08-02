@@ -122,11 +122,15 @@ function Welcome({
   launchingDemo,
   onCreate,
   onDemo,
+  importing,
+  onImport,
 }: {
   creating: boolean;
   launchingDemo: boolean;
   onCreate: (name: string, description: string) => void;
   onDemo: () => void;
+  importing: boolean;
+  onImport: (file: File) => void;
 }) {
   return (
     <main className="welcome">
@@ -188,6 +192,28 @@ function Welcome({
           </span>
           <Icon name="arrow" />
         </button>
+        <div className="or-divider">
+          <span>或者恢复已有身份</span>
+        </div>
+        <label className={`demo-button import-button${importing ? " is-disabled" : ""}`}>
+          <input
+            accept="application/json,.json"
+            aria-label="选择 Persona 导出文件"
+            disabled={importing}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) onImport(file);
+              event.target.value = "";
+            }}
+            type="file"
+          />
+          <span className="demo-glyph">R</span>
+          <span>
+            <strong>{importing ? "正在校验并恢复…" : "从可校验导出恢复"}</strong>
+            <small>保留 Persona UUID，原始资料在本机重新加密</small>
+          </span>
+          <Icon name="file" />
+        </label>
       </section>
     </main>
   );
@@ -209,6 +235,7 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [launchingDemo, setLaunchingDemo] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [reauthenticationOpen, setReauthenticationOpen] = useState(false);
@@ -376,6 +403,36 @@ export default function App() {
       );
     } finally {
       setLaunchingDemo(false);
+    }
+  };
+
+  const importPersona = async (file: File) => {
+    setImporting(true);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("导出文件必须是 JSON 对象。");
+      }
+      const result = await api.importPersona(
+        parsed as Parameters<typeof api.importPersona>[0],
+      );
+      setPersonas((current) => [...current, result.persona]);
+      selectPersona(result.persona.id);
+      notify(
+        `已恢复同一身份，并重建 ${result.indexing?.created_count ?? 0} 条记忆索引。`,
+        "success",
+      );
+    } catch (error) {
+      notify(
+        error instanceof SyntaxError
+          ? "导出文件不是有效 JSON。"
+          : error instanceof Error
+            ? error.message
+            : "恢复人物失败",
+        "danger",
+      );
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -559,11 +616,13 @@ export default function App() {
         ) : personas.length === 0 ? (
           <Welcome
             creating={creating}
+            importing={importing}
             launchingDemo={launchingDemo}
             onCreate={(name, description) =>
               void createPersona(name, description)
             }
             onDemo={() => void launchDemo()}
+            onImport={(file) => void importPersona(file)}
           />
         ) : selectedPersona ? (
           <main className="page" key={`${selectedPersona.id}:${page}`}>

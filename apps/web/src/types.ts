@@ -315,3 +315,28 @@ export interface PersonaExport {
     audit_event_id: string;
   };
 }
+
+export interface PersonaImportResult {
+  persona: Persona;
+  restored: {
+    persona_id: string;
+    identity_preserved: boolean;
+    source_document_count: number;
+    memory_count: number;
+    memory_version_count: number;
+    conversation_count: number;
+    audit_event_count: number;
+    import_audit_event_id: string;
+  };
+  indexing: {
+    eligible_count: number;
+    indexed_count: number;
+    created_count: number;
+  } | null;
+  manifest: {
+    sha256: string;
+    schema_version: string;
+    identity_preserved: boolean;
+    model_boundaries_reset_to_local: boolean;
+  };
+}

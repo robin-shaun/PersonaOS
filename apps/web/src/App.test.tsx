@@ -246,6 +246,39 @@ function baseRoutes({
           201,
         );
       }
+      if (url.pathname === "/api/v1/personas/import" && method === "POST") {
+        return json(
+          {
+            persona: {
+              ...persona,
+              id: "restored-persona",
+              display_name: "恢复的人物",
+            },
+            restored: {
+              persona_id: "restored-persona",
+              identity_preserved: true,
+              source_document_count: 1,
+              memory_count: 1,
+              memory_version_count: 2,
+              conversation_count: 0,
+              audit_event_count: 3,
+              import_audit_event_id: "audit-import",
+            },
+            indexing: {
+              eligible_count: 1,
+              indexed_count: 1,
+              created_count: 1,
+            },
+            manifest: {
+              sha256: "a".repeat(64),
+              schema_version: "persona-export-v1",
+              identity_preserved: true,
+              model_boundaries_reset_to_local: true,
+            },
+          },
+          201,
+        );
+      }
       if (url.pathname.endsWith("/documents") && method === "GET") {
         return json([]);
       }
@@ -447,6 +480,36 @@ describe("PersonaOS Web", () => {
       description: "测试边界",
     });
     expect(createCall?.csrf).toBe("csrf-test-token");
+  });
+
+  it("restores a portable export from the empty workspace", async () => {
+    const { calls } = baseRoutes({ personas: [] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: /让记忆有来源/ });
+    const packageFile = new File(
+      [JSON.stringify({ export: { persona: { id: "restored-persona" } }, manifest: {} })],
+      "persona-export.json",
+      { type: "application/json" },
+    );
+    await user.upload(
+      screen.getByLabelText("选择 Persona 导出文件"),
+      packageFile,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "你好，这是 恢复的人物" }),
+    ).toBeInTheDocument();
+    const importCall = calls.find(
+      (call) =>
+        call.method === "POST" && call.path === "/api/v1/personas/import",
+    );
+    expect(importCall?.body).toEqual({
+      export: { persona: { id: "restored-persona" } },
+      manifest: {},
+    });
+    expect(importCall?.csrf).toBe("csrf-test-token");
   });
 
   it("keeps a candidate behind an explicit human review gate", async () => {

@@ -16,6 +16,7 @@ import type {
   ModelBoundary,
   Persona,
   PersonaExport,
+  PersonaImportResult,
   Sensitivity,
   SourceDocument,
   Task,
@@ -185,6 +186,12 @@ export const api = {
         display_name: displayName,
         description,
       }),
+    }),
+
+  importPersona: (personaExport: PersonaExport) =>
+    request<PersonaImportResult>("/api/v1/personas/import", {
+      method: "POST",
+      body: JSON.stringify(personaExport),
     }),
 
   updateModelPolicy: (

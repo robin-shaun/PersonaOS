@@ -1303,6 +1303,31 @@ textarea::placeholder {
   font-size: 0.66rem;
 }
 
+.import-button {
+  position: relative;
+  cursor: pointer;
+  background: #e7f0eb;
+  border-color: #c8d9cf;
+}
+
+.import-button:hover:not(.is-disabled) {
+  background: #deebe4;
+}
+
+.import-button.is-disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.import-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 /* Documents */
 .upload-panel {
   display: grid;
