@@ -18,6 +18,7 @@ PersonaOS 不声称复制了现实中的人。它把授权资料、记忆候选�
 经过人工审批，用户选择会成为可审核的偏好证据。
 
 **文档入口：** [五分钟演示](#五分钟本地演示) ·
+[30～60 秒记忆连续性演示](docs/demos/v0.1-memory-continuity.md) ·
 [架构](docs/architecture.md) · [API](docs/api.md) ·
 [Skill 开发](docs/skill-development.md) · [路线图](ROADMAP.md) ·
 [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) ·

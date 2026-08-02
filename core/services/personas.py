@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import threading
 from hashlib import sha256
@@ -452,6 +454,9 @@ class PersonaService:
                             "document_id": item["document_id"],
                             "content_sha256": item["content_sha256"],
                             "content": content.decode("utf-8-sig"),
+                            "content_base64": base64.b64encode(content).decode(
+                                "ascii"
+                            ),
                         }
                     )
         encoded = json.dumps(
@@ -481,6 +486,147 @@ class PersonaService:
                 "audit_event_id": audit_event_id,
             },
         }
+
+    def import_persona(
+        self,
+        access: AccessContext,
+        *,
+        package: dict[str, Any],
+    ) -> dict[str, Any]:
+        snapshot, manifest, raw_sources = self._validate_import_package(package)
+        lifecycle = self._require_lifecycle()
+        persona = snapshot["persona"]
+        persona_id = str(persona["id"])
+
+        object_keys: dict[str, str] = {}
+        created_blobs: list[str] = []
+        with self._blob_lock:
+            try:
+                for document_id, content in raw_sources.items():
+                    blob = self._blob_store.put(content)
+                    object_keys[document_id] = blob.object_key
+                    if blob.created:
+                        created_blobs.append(blob.object_key)
+                restored = lifecycle.restore_snapshot(
+                    access,
+                    snapshot=snapshot,
+                    object_keys=object_keys,
+                    import_sha256=str(manifest["sha256"]),
+                )
+            except Exception:
+                for object_key in reversed(created_blobs):
+                    self._blob_store.delete(object_key)
+                raise
+
+        indexing = (
+            self._memory_index.ensure_persona_indexed(
+                access,
+                persona_id=persona_id,
+            )
+            if self._memory_index is not None
+            else None
+        )
+        return {
+            "persona": self.get(access, persona_id),
+            "restored": restored,
+            "indexing": indexing,
+            "manifest": {
+                "sha256": manifest["sha256"],
+                "schema_version": snapshot["schema_version"],
+                "identity_preserved": True,
+                "model_boundaries_reset_to_local": True,
+            },
+        }
+
+    def _validate_import_package(
+        self,
+        package: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, bytes]]:
+        if set(package) != {"export", "manifest"}:
+            raise ValueError("persona import must contain export and manifest")
+        snapshot = package.get("export")
+        manifest = package.get("manifest")
+        if not isinstance(snapshot, dict) or not isinstance(manifest, dict):
+            raise ValueError("persona import export and manifest must be objects")
+        encoded = json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) > self._max_export_bytes:
+            raise ValueError(
+                f"persona import exceeds {self._max_export_bytes} bytes"
+            )
+        digest = sha256(encoded).hexdigest()
+        if manifest.get("sha256") != digest:
+            raise ValueError("persona import manifest SHA-256 does not match export")
+        if manifest.get("byte_size") != len(encoded):
+            raise ValueError("persona import manifest byte size does not match export")
+        if manifest.get("included_raw_sources") is not True:
+            raise ValueError("persona restore requires an export with raw sources")
+        if snapshot.get("schema_version") != "persona-export-v1":
+            raise ValueError("unsupported persona export schema version")
+        persona = snapshot.get("persona")
+        if not isinstance(persona, dict):
+            raise ValueError("persona export is missing persona identity")
+        persona_id = persona.get("id")
+        if not isinstance(persona_id, str) or not persona_id or len(persona_id) > 36:
+            raise ValueError("persona export has an invalid identity")
+
+        documents = self._import_rows(snapshot, "source_documents")
+        raw_rows = self._import_rows(snapshot, "raw_sources")
+        document_ids = {
+            str(item.get("id"))
+            for item in documents
+            if isinstance(item.get("id"), str)
+        }
+        if len(document_ids) != len(documents):
+            raise ValueError("persona export contains invalid or duplicate documents")
+        raw_sources: dict[str, bytes] = {}
+        for item in raw_rows:
+            document_id = item.get("document_id")
+            expected_hash = item.get("content_sha256")
+            if document_id not in document_ids or document_id in raw_sources:
+                raise ValueError("persona export raw source references are invalid")
+            if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+                raise ValueError("persona export raw source hash is invalid")
+            encoded_content = item.get("content_base64")
+            if encoded_content is not None:
+                if not isinstance(encoded_content, str):
+                    raise ValueError("persona export raw source encoding is invalid")
+                try:
+                    content = base64.b64decode(encoded_content, validate=True)
+                except (binascii.Error, ValueError) as exc:
+                    raise ValueError(
+                        "persona export raw source base64 is invalid"
+                    ) from exc
+            else:
+                text_content = item.get("content")
+                if not isinstance(text_content, str):
+                    raise ValueError("persona export raw source content is invalid")
+                content = text_content.encode("utf-8")
+            if not content or sha256(content).hexdigest() != expected_hash:
+                raise ValueError("persona export raw source failed SHA-256 verification")
+            raw_sources[str(document_id)] = content
+        if set(raw_sources) != document_ids:
+            raise ValueError("persona restore requires raw content for every document")
+        document_hashes = {
+            str(item["id"]): item.get("content_sha256") for item in documents
+        }
+        if any(
+            sha256(content).hexdigest() != document_hashes[document_id]
+            for document_id, content in raw_sources.items()
+        ):
+            raise ValueError("persona export document and raw source hashes differ")
+        return snapshot, manifest, raw_sources
+
+    @staticmethod
+    def _import_rows(snapshot: dict[str, Any], name: str) -> list[dict[str, Any]]:
+        rows = snapshot.get(name)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError(f"persona export {name} must be a list of objects")
+        return rows
 
     def _require_lifecycle(self) -> PersonaLifecycleRepository:
         if self._lifecycle is None:

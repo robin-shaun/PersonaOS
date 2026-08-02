@@ -28,6 +28,7 @@ from apps.api.schemas import (
     PersonaConversationCreate,
     PersonaCreate,
     PersonaExportRequest,
+    PersonaImportRequest,
     PersonaMemoryRelationCreate,
     PersonaMemoryReviewRequest,
     PersonaMemoryUpdateRequest,
@@ -880,6 +881,36 @@ def create_app(container: Container | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=str(exc),
+            ) from exc
+
+    @app.post(
+        "/api/v1/personas/import",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def import_persona(
+        payload: PersonaImportRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        require_recent(
+            request,
+            action="persona.imported_with_raw_sources",
+            resource_type="persona_export",
+            resource_id=str(payload.export.get("persona", {}).get("id", "unknown")),
+        )
+        try:
+            return container.personas.import_persona(
+                persona_access(request),
+                package=payload.model_dump(),
+            )
+        except FileExistsError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
 

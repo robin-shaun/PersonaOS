@@ -6,7 +6,8 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import DateTime, delete, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.security.access import AccessContext
@@ -58,6 +59,45 @@ def _canonical_hash(value: object) -> str:
         default=str,
     ).encode("utf-8")
     return sha256(encoded).hexdigest()
+
+
+def _import_datetime(value: Any, *, field: str) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        raise ValueError(f"persona export {field} must be an ISO timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            f"persona export {field} must be an ISO timestamp"
+        ) from exc
+    return parsed.replace(tzinfo=parsed.tzinfo or UTC)
+
+
+def _import_record(
+    model: Any,
+    row: dict[str, Any],
+    *,
+    overrides: dict[str, Any] | None = None,
+) -> Any:
+    columns = {column.name: column for column in model.__table__.columns}
+    unexpected = set(row).difference(columns)
+    if unexpected:
+        names = ", ".join(sorted(unexpected))
+        raise ValueError(
+            f"persona export {model.__tablename__} has unexpected fields: {names}"
+        )
+    values = dict(row)
+    values.update(overrides or {})
+    for name, value in list(values.items()):
+        column = columns.get(name)
+        if column is not None and isinstance(column.type, DateTime):
+            values[name] = _import_datetime(
+                value,
+                field=f"{model.__tablename__}.{name}",
+            )
+    return model(**values)
 
 
 class PersonaLifecycleRepository:
@@ -973,6 +1013,377 @@ class PersonaLifecycleRepository:
                     "schema_version": "persona-export-v1",
                 },
             )
+
+    def restore_snapshot(
+        self,
+        access: AccessContext,
+        *,
+        snapshot: dict[str, Any],
+        object_keys: dict[str, str],
+        import_sha256: str,
+    ) -> dict[str, Any]:
+        """Restore a verified portable export while preserving its Persona UUID.
+
+        Raw blobs are already authenticated and encrypted by ``PersonaService``.
+        This transaction restores source-bound domain records and historical
+        conversations. Derived vectors are intentionally rebuilt after commit.
+        """
+        rows = {
+            name: self._snapshot_rows(snapshot, name)
+            for name in (
+                "source_documents",
+                "document_chunks",
+                "memories",
+                "memory_versions",
+                "memory_evidence",
+                "memory_relations",
+                "embedding_spaces",
+                "conversations",
+                "conversation_messages",
+                "retrieval_runs",
+                "model_calls",
+                "answer_citations",
+                "audit_events",
+            )
+        }
+        persona_row = snapshot.get("persona")
+        if not isinstance(persona_row, dict):
+            raise ValueError("persona export is missing persona identity")
+        persona_id = str(persona_row.get("id", ""))
+        self._validate_restore_graph(
+            persona_id=persona_id,
+            rows=rows,
+            object_keys=object_keys,
+        )
+
+        try:
+            with self.database.session(owner_id=access.owner_id) as session:
+                if session.get(PersonaRecord, persona_id) is not None:
+                    raise FileExistsError(
+                        f"Persona {persona_id} already exists; restore requires "
+                        "a clean target identity"
+                    )
+                persona = _import_record(
+                    PersonaRecord,
+                    persona_row,
+                    overrides={
+                        "owner_id": access.owner_id,
+                        "allowed_model_boundaries": ["local"],
+                        "deleted_at": None,
+                    },
+                )
+                session.add(persona)
+                session.flush()
+
+                for row in rows["source_documents"]:
+                    document_id = str(row["id"])
+                    session.add(
+                        _import_record(
+                            SourceDocumentRecord,
+                            row,
+                            overrides={
+                                "persona_id": persona_id,
+                                "owner_id": access.owner_id,
+                                "task_id": None,
+                                "object_key": object_keys[document_id],
+                            },
+                        )
+                    )
+                session.flush()
+
+                self._add_import_rows(
+                    session,
+                    DocumentChunkRecord,
+                    rows["document_chunks"],
+                    common={"persona_id": persona_id},
+                )
+                self._add_import_rows(
+                    session,
+                    PersonaMemoryRecord,
+                    rows["memories"],
+                    common={"persona_id": persona_id, "owner_id": access.owner_id},
+                )
+                self._add_import_rows(
+                    session,
+                    PersonaMemoryVersionRecord,
+                    rows["memory_versions"],
+                )
+                self._add_import_rows(
+                    session,
+                    PersonaMemoryEvidenceRecord,
+                    rows["memory_evidence"],
+                )
+                self._add_import_rows(
+                    session,
+                    PersonaMemoryRelationRecord,
+                    rows["memory_relations"],
+                    common={"persona_id": persona_id, "owner_id": access.owner_id},
+                )
+
+                for row in rows["embedding_spaces"]:
+                    existing = session.get(EmbeddingSpaceRecord, row.get("id"))
+                    if existing is None:
+                        session.add(_import_record(EmbeddingSpaceRecord, row))
+                    elif any(
+                        getattr(existing, field) != row.get(field)
+                        for field in (
+                            "provider",
+                            "model_name",
+                            "model_version",
+                            "dimensions",
+                            "config_hash",
+                            "data_boundary",
+                        )
+                    ):
+                        raise ValueError(
+                            "persona export embedding space conflicts with target"
+                        )
+
+                self._add_import_rows(
+                    session,
+                    ConversationRecord,
+                    rows["conversations"],
+                    common={"persona_id": persona_id, "owner_id": access.owner_id},
+                )
+                self._add_import_rows(
+                    session,
+                    ConversationMessageRecord,
+                    rows["conversation_messages"],
+                    common={"persona_id": persona_id, "owner_id": access.owner_id},
+                )
+                self._add_import_rows(
+                    session,
+                    RetrievalRunRecord,
+                    rows["retrieval_runs"],
+                    common={"persona_id": persona_id, "owner_id": access.owner_id},
+                )
+                self._add_import_rows(
+                    session,
+                    PersonaModelCallRecord,
+                    rows["model_calls"],
+                )
+                self._add_import_rows(
+                    session,
+                    AnswerCitationRecord,
+                    rows["answer_citations"],
+                )
+                self._add_import_rows(
+                    session,
+                    AuditEventRecord,
+                    rows["audit_events"],
+                    common={
+                        "persona_id": persona_id,
+                        "owner_id": access.owner_id,
+                        "approval_id": None,
+                    },
+                )
+                session.flush()
+                audit_id = self._add_audit(
+                    session,
+                    access=access,
+                    persona_id=persona_id,
+                    action="persona.imported",
+                    resource_type="persona",
+                    resource_id=persona_id,
+                    dedupe_key=f"persona.imported:{persona_id}:{import_sha256}",
+                    risk_level="high",
+                    after_hash=import_sha256,
+                    detail={
+                        "schema_version": snapshot.get("schema_version"),
+                        "identity_preserved": True,
+                        "model_boundaries_reset_to_local": True,
+                    },
+                )
+                session.flush()
+        except FileExistsError:
+            raise
+        except IntegrityError as exc:
+            raise ValueError(
+                "persona export violates target database constraints"
+            ) from exc
+
+        return {
+            "persona_id": persona_id,
+            "identity_preserved": True,
+            "source_document_count": len(rows["source_documents"]),
+            "memory_count": len(rows["memories"]),
+            "memory_version_count": len(rows["memory_versions"]),
+            "conversation_count": len(rows["conversations"]),
+            "audit_event_count": len(rows["audit_events"]) + 1,
+            "import_audit_event_id": audit_id,
+        }
+
+    @staticmethod
+    def _snapshot_rows(
+        snapshot: dict[str, Any],
+        name: str,
+    ) -> list[dict[str, Any]]:
+        value = snapshot.get(name)
+        if not isinstance(value, list) or any(
+            not isinstance(item, dict) for item in value
+        ):
+            raise ValueError(f"persona export {name} must be a list of objects")
+        return value
+
+    @staticmethod
+    def _row_ids(rows: list[dict[str, Any]], name: str) -> set[str]:
+        values = [item.get("id") for item in rows]
+        if any(not isinstance(value, str) or not value for value in values):
+            raise ValueError(f"persona export {name} contains an invalid ID")
+        output = set(values)
+        if len(output) != len(values):
+            raise ValueError(f"persona export {name} contains duplicate IDs")
+        return output
+
+    @classmethod
+    def _validate_restore_graph(
+        cls,
+        *,
+        persona_id: str,
+        rows: dict[str, list[dict[str, Any]]],
+        object_keys: dict[str, str],
+    ) -> None:
+        if not persona_id:
+            raise ValueError("persona export identity is invalid")
+        documents = cls._row_ids(rows["source_documents"], "source_documents")
+        chunks = cls._row_ids(rows["document_chunks"], "document_chunks")
+        memories = cls._row_ids(rows["memories"], "memories")
+        versions = cls._row_ids(rows["memory_versions"], "memory_versions")
+        evidence = cls._row_ids(rows["memory_evidence"], "memory_evidence")
+        cls._row_ids(rows["memory_relations"], "memory_relations")
+        spaces = cls._row_ids(rows["embedding_spaces"], "embedding_spaces")
+        conversations = cls._row_ids(rows["conversations"], "conversations")
+        messages = cls._row_ids(
+            rows["conversation_messages"], "conversation_messages"
+        )
+        retrievals = cls._row_ids(rows["retrieval_runs"], "retrieval_runs")
+        cls._row_ids(rows["model_calls"], "model_calls")
+        cls._row_ids(rows["answer_citations"], "answer_citations")
+        cls._row_ids(rows["audit_events"], "audit_events")
+        if set(object_keys) != documents:
+            raise ValueError("persona export blob map does not match documents")
+
+        def require(condition: bool, message: str) -> None:
+            if not condition:
+                raise ValueError(f"persona export graph is invalid: {message}")
+
+        require(
+            all(item.get("persona_id") == persona_id for item in rows["source_documents"]),
+            "document persona mismatch",
+        )
+        require(
+            all(
+                item.get("document_id") in documents
+                and item.get("persona_id") == persona_id
+                for item in rows["document_chunks"]
+            ),
+            "chunk reference mismatch",
+        )
+        require(
+            all(
+                item.get("source_document_id") in documents
+                and item.get("persona_id") == persona_id
+                for item in rows["memories"]
+            ),
+            "memory source mismatch",
+        )
+        version_owner = {
+            str(item["id"]): item.get("memory_id")
+            for item in rows["memory_versions"]
+        }
+        require(
+            all(owner in memories for owner in version_owner.values()),
+            "memory version reference mismatch",
+        )
+        require(
+            all(
+                item.get("current_version_id") in versions
+                and version_owner.get(str(item.get("current_version_id"))) == item.get("id")
+                for item in rows["memories"]
+            ),
+            "current memory version mismatch",
+        )
+        require(
+            all(
+                item.get("memory_version_id") in versions
+                and item.get("source_document_id") in documents
+                and item.get("document_chunk_id") in chunks
+                for item in rows["memory_evidence"]
+            ),
+            "memory evidence reference mismatch",
+        )
+        require(
+            all(
+                item.get("persona_id") == persona_id
+                and item.get("from_memory_id") in memories
+                and item.get("to_memory_id") in memories
+                and set(item.get("evidence_memory_version_ids") or []).issubset(versions)
+                for item in rows["memory_relations"]
+            ),
+            "memory relation reference mismatch",
+        )
+        require(
+            all(item.get("persona_id") == persona_id for item in rows["conversations"]),
+            "conversation persona mismatch",
+        )
+        require(
+            all(
+                item.get("persona_id") == persona_id
+                and item.get("conversation_id") in conversations
+                for item in rows["conversation_messages"]
+            ),
+            "conversation message reference mismatch",
+        )
+        require(
+            all(
+                item.get("persona_id") == persona_id
+                and item.get("conversation_id") in conversations
+                and item.get("user_message_id") in messages
+                and item.get("embedding_space_id") in spaces
+                for item in rows["retrieval_runs"]
+            ),
+            "retrieval reference mismatch",
+        )
+        require(
+            all(
+                item.get("retrieval_run_id") in retrievals
+                and (
+                    item.get("assistant_message_id") is None
+                    or item.get("assistant_message_id") in messages
+                )
+                for item in rows["model_calls"]
+            ),
+            "model call reference mismatch",
+        )
+        require(
+            all(
+                item.get("assistant_message_id") in messages
+                and item.get("retrieval_run_id") in retrievals
+                and item.get("memory_id") in memories
+                and item.get("memory_version_id") in versions
+                and item.get("evidence_id") in evidence
+                and item.get("source_document_id") in documents
+                and item.get("document_chunk_id") in chunks
+                for item in rows["answer_citations"]
+            ),
+            "citation reference mismatch",
+        )
+        require(
+            all(item.get("persona_id") == persona_id for item in rows["audit_events"]),
+            "audit persona mismatch",
+        )
+
+    @staticmethod
+    def _add_import_rows(
+        session: Session,
+        model: Any,
+        rows: list[dict[str, Any]],
+        *,
+        common: dict[str, Any] | None = None,
+    ) -> None:
+        for row in rows:
+            session.add(_import_record(model, row, overrides=common))
+        session.flush()
 
     @staticmethod
     def _summary(content: str) -> str:

@@ -198,6 +198,11 @@ class PersonaExportRequest(StrictRequest):
     include_raw_sources: bool = True
 
 
+class PersonaImportRequest(StrictRequest):
+    export: dict[str, Any]
+    manifest: dict[str, Any]
+
+
 class PersonaConversationCreate(StrictRequest):
     title: str | None = Field(default=None, max_length=300)
 

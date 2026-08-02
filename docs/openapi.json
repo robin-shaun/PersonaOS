@@ -241,6 +241,27 @@
         "title": "PersonaExportRequest",
         "type": "object"
       },
+      "PersonaImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "export": {
+            "additionalProperties": true,
+            "title": "Export",
+            "type": "object"
+          },
+          "manifest": {
+            "additionalProperties": true,
+            "title": "Manifest",
+            "type": "object"
+          }
+        },
+        "required": [
+          "export",
+          "manifest"
+        ],
+        "title": "PersonaImportRequest",
+        "type": "object"
+      },
       "PersonaMemoryRelationCreate": {
         "additionalProperties": false,
         "properties": {
@@ -1737,6 +1758,52 @@
           }
         ],
         "summary": "Create Persona"
+      }
+    },
+    "/api/v1/personas/import": {
+      "post": {
+        "operationId": "import_persona_api_v1_personas_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonaImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Import Persona Api V1 Personas Import Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "CsrfToken": [],
+            "PersonaSession": []
+          }
+        ],
+        "summary": "Import Persona"
       }
     },
     "/api/v1/personas/{persona_id}": {
