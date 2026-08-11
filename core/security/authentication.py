@@ -163,6 +163,30 @@ class AuthenticationService:
             request_id=request_id,
         )
 
+    def register_member(
+        self,
+        *,
+        username: str,
+        display_name: str,
+        password: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create an ordinary account after trusted admin bootstrap."""
+        if self.setup_required():
+            raise PermissionError("an administrator must be created first")
+        normalized_username = normalize_username(username)
+        normalized_display_name = normalize_display_name(display_name)
+        normalized_password = validate_password(password)
+        return self._repository.create_account(
+            username=normalized_username,
+            display_name=normalized_display_name,
+            password_hash=self._password_hasher.hash(normalized_password),
+            role="member",
+            actor_id=None,
+            request_id=request_id,
+            created_via="public_registration",
+        )
+
     def login(
         self,
         *,

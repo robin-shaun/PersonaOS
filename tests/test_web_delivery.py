@@ -39,6 +39,12 @@ def test_web_container_is_unprivileged_and_proxies_same_origin_api() -> None:
     assert "proxy_pass http://api:18110;" in nginx
     assert "location = /healthz" in nginx
     assert "frame-ancestors 'none'" in nginx
+    assert "frame-src https://challenges.cloudflare.com" in nginx
+    assert "script-src 'self' https://challenges.cloudflare.com" in nginx
+    assert "map $http_x_forwarded_proto $persona_forwarded_proto" in nginx
+    assert nginx.count(
+        "proxy_set_header X-Forwarded-Proto $persona_forwarded_proto;"
+    ) == 2
     assert "client_max_body_size 6m;" in nginx
 
 

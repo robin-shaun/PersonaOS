@@ -483,6 +483,40 @@ export default function App() {
     }
   };
 
+  const register = async (
+    username: string,
+    displayName: string,
+    password: string,
+    turnstileToken: string,
+  ) => {
+    setLoginBusy(true);
+    setLoginError("");
+    try {
+      const sessionResult = await api.register(
+        username,
+        displayName,
+        password,
+        turnstileToken,
+      );
+      setAuthenticatedSession(sessionResult);
+      setPersonas([]);
+      setSelectedPersonaId("");
+      notify(`欢迎，${sessionResult.account.display_name}。`, "success");
+    } catch (error) {
+      setLoginError(
+        error instanceof ApiError && error.status === 400
+          ? "人机验证已失效，请重试。"
+          : error instanceof ApiError && error.status === 409
+            ? "该用户名不可用，或注册暂时无法完成。"
+            : error instanceof Error
+              ? error.message
+              : "注册失败",
+      );
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await api.logout();
@@ -525,8 +559,13 @@ export default function App() {
       <AuthenticationGate
         busy={loginBusy}
         error={loginError}
-        onLogin={(username, password) => void login(username, password)}
+        onLogin={login}
+        onRegister={register}
+        registrationEnabled={
+          authenticationStatus?.registration_enabled ?? false
+        }
         setupRequired={authenticationStatus?.setup_required ?? false}
+        turnstileSiteKey={authenticationStatus?.turnstile_site_key ?? null}
       />
     );
   }

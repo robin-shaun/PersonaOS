@@ -80,8 +80,9 @@ Personal Layer 还会把用户对数字员工输出的修改、拒绝和显式�
 - 未来数字人会把形象初始化、文本生成、TTS、面部驱动和渲染分开。生成一次人物
   形象不意味着之后零成本运行：TTS、神经渲染或视频生成在运行时仍可能持续消耗
   CPU/GPU，具体需求取决于适配器；
-- 当前可信账户边界仍只面向本机部署，不包含 MFA、账户恢复、集中限流或公网
-  身份平台；不要因已有登录就把服务直接暴露到不可信网络。
+- 当前账户边界不包含 MFA、自助恢复或完整公网身份平台。公众注册只能配合 HTTPS、
+  Turnstile、Cloudflare 边缘限流和下文的 Named Tunnel 方案开启；不得开放 API
+  端口或用路由器端口转发代替安全入口。
 
 ## 五分钟本地演示
 
@@ -136,6 +137,70 @@ PERSONAOS_WEB_BIND_HOST=192.168.1.23 \
 `PERSONAOS_WEB_BIND_HOST`。这仍是明文 HTTP 的本地演示入口，只应用于可信网络
 和非敏感演示资料，不能做路由器端口转发或直接暴露公网；异地访问应使用带 TLS
 和访问控制的正式部署或安全隧道。
+
+### 公网手机访问与公众注册（Cloudflare）
+
+可以使用 Cloudflare，但应使用有固定名称和域名的 **Named Tunnel**，不要把临时
+Quick Tunnel 或旧 Worker 中转地址当作正式入口。API 继续只绑定
+`127.0.0.1:18110`，Tunnel 只连接同源 Web 入口 `127.0.0.1:18111`。
+
+先保持公众注册关闭，启动服务并在可信主机创建你自己的管理员。将下面的用户名和
+显示名称替换为你自己的值；密码只会在终端中无回显输入：
+
+~~~bash
+docker compose up --build --detach --wait
+docker compose exec api \
+  python -m apps.admin create-account \
+  --username YOUR_ADMIN_USERNAME \
+  --display-name "YOUR_DISPLAY_NAME" \
+  --role admin
+~~~
+
+然后在 Cloudflare Turnstile 创建绑定到实际公网主机名（例如
+`persona.example.com`）的 widget，把 Site Key 和 Secret Key 写入权限为 `0600`
+的 `.env`，并重新创建服务：
+
+~~~dotenv
+PERSONA_COOKIE_SECURE=true
+PERSONA_PUBLIC_REGISTRATION_ENABLED=true
+PERSONA_TURNSTILE_SITE_KEY=YOUR_SITE_KEY
+PERSONA_TURNSTILE_SECRET_KEY=YOUR_SECRET_KEY
+~~~
+
+~~~bash
+chmod 600 .env
+docker compose up --build --detach --wait
+~~~
+
+创建 Named Tunnel 并把公网 DNS 指向它；`UUID` 和凭据路径以 Cloudflare 实际输出
+为准：
+
+~~~bash
+cloudflared tunnel login
+cloudflared tunnel create personaos
+cloudflared tunnel route dns personaos persona.example.com
+~~~
+
+`~/.cloudflared/config.yml`：
+
+~~~yaml
+tunnel: UUID
+credentials-file: /home/YOUR_USER/.cloudflared/UUID.json
+ingress:
+  - hostname: persona.example.com
+    service: http://127.0.0.1:18111
+  - service: http_status:404
+~~~
+
+~~~bash
+cloudflared tunnel run personaos
+~~~
+
+现在任何人都可以用手机打开 HTTPS 域名并注册，但 HTTP 注册接口固定创建
+`member`；管理员只能由上述可信命令或已登录且近期重新验证的管理员创建。还应在
+Cloudflare WAF 为 `/api/v1/auth/login` 和 `/api/v1/auth/register` 配置按来源
+地址的速率限制。应用内限流只覆盖单个 API 进程，不能替代边缘限流。不要把
+Turnstile Secret、`.env`、Tunnel 凭据、数据库或 Persona 密钥提交到仓库。
 
 停止服务：
 
@@ -457,6 +522,7 @@ Worker 停止当前协程后再收敛为 `cancelled`。重复取消是幂等的�
 | GET | /health | 公开运行状态与账户初始化状态 |
 | GET | /api/v1/auth/status | 公开读取认证模式与是否需要首个管理员 |
 | POST | /api/v1/auth/login | 登录并设置 HttpOnly 会话 Cookie |
+| POST | /api/v1/auth/register | Turnstile 验证后注册普通成员并登录 |
 | GET | /api/v1/auth/session | 读取可信账户、期限和会话绑定 CSRF |
 | POST | /api/v1/auth/reauthenticate | 验证密码并轮换 Cookie 与 CSRF |
 | POST | /api/v1/auth/logout | 撤销当前服务端会话 |
@@ -609,8 +675,9 @@ Nginx 的真实 Compose smoke，并在结束时删除专用 CI volume。
   HttpOnly/SameSite=Strict，写请求同时检查 CSRF 和 Origin；PostgreSQL 使用
   `FORCE ROW LEVEL SECURITY` 作为应用 owner 过滤的第二道边界。SQLite 没有
   RLS；普通事务会降权到不可登录、不能绕过 RLS 的 `personaos_runtime` 角色。
-  SQLite 只适合本机开发和应用隔离测试。当前仍无 MFA、账户恢复、集中速率限制、
-  独立 migration/runtime 登录凭据或公网生产身份基线。
+  SQLite 只适合本机开发和应用隔离测试。可选公众注册要求 Secure Cookie、
+  Turnstile 和 Cloudflare 边缘限流；当前仍无 MFA、账户恢复、独立
+  migration/runtime 登录凭据或经过独立审计的公网身份平台。
 - 原始上传 Blob 使用 AES-256-GCM 加密；用于审核和后续检索的 chunk、候选内容
   与引用摘录仍以数据库可读字段保存。生产部署仍需要主机/卷加密和备份保护。
 - 当前提取器按可复现文本块生成候选并做粗粒度类型规则，不是完整的事实抽取或

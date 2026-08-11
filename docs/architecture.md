@@ -15,7 +15,7 @@ PersonaOS `0.12.0` 有两个相互隔离但复用同一运行底座的产品闭�
 
 ![PersonaOS 本地优先证据架构](architecture.svg)
 
-## 可信本地账户与数据隔离
+## 可信账户、公众注册与数据隔离
 
     Browser
       │  HttpOnly / SameSite=Strict opaque Cookie
@@ -41,6 +41,13 @@ PersonaOS `0.12.0` 有两个相互隔离但复用同一运行底座的产品闭�
 `argon2-cffi` RFC 9106 low-memory Argon2id profile，数据库不保存可用的会话
 bearer token。登录、再认证、失败、拒绝和注销写入独立 `auth_events`，detail
 不包含密码、Cookie、CSRF、User-Agent 原文或人物资料。
+
+公众注册默认关闭；开启时配置层强制 Secure Cookie 和 Cloudflare Turnstile
+Site/Secret Key。匿名接口通过服务端 Siteverify 后调用只允许 `member` 的独立
+service method，客户端即使提交 `role` 也会被 strict schema 拒绝。注册前仍要求
+可信管理员已经存在。登录/注册有单进程滑动窗口保护，公网入口另由 Cloudflare
+TLS Tunnel 和 WAF 集中限流；设计取舍见
+[ADR 0005](adr/0005-public-member-registration.md)。
 
 登录和再认证都会轮换会话 token；高风险动作在近期验证窗口外返回机器可识别的
 `428`，且不会自动执行原动作。当前高风险集合包括删除资料/记忆、含解密原文的

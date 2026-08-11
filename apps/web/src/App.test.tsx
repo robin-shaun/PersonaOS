@@ -136,12 +136,14 @@ function baseRoutes({
   answer,
   authenticated = true,
   setupRequired = false,
+  registrationEnabled = false,
 }: {
   personas?: Persona[];
   candidates?: MemoryBundle[];
   answer?: AnswerResult;
   authenticated?: boolean;
   setupRequired?: boolean;
+  registrationEnabled?: boolean;
 } = {}) {
   let signedIn = authenticated;
   const calls: Array<{
@@ -169,7 +171,9 @@ function baseRoutes({
           status: "ok",
           version: "0.12.0",
           runtime: "rules-v1",
-          persona_identity_mode: "trusted_local_accounts",
+          persona_identity_mode: registrationEnabled
+            ? "public_registration"
+            : "trusted_local_accounts",
           account_setup_required: setupRequired,
           persona_blob_encryption: "AES-256-GCM",
           persona_embedding_space_id: "space-1",
@@ -177,10 +181,14 @@ function baseRoutes({
       }
       if (url.pathname === "/api/v1/auth/status") {
         return json({
-          mode: "trusted_local_accounts",
+          mode: registrationEnabled
+            ? "public_registration"
+            : "trusted_local_accounts",
           setup_required: setupRequired,
-          cookie_secure: false,
-          local_only: true,
+          cookie_secure: registrationEnabled,
+          local_only: !registrationEnabled,
+          registration_enabled: registrationEnabled,
+          turnstile_site_key: registrationEnabled ? "site-key" : null,
         });
       }
       if (url.pathname === "/api/v1/auth/session") {
@@ -194,6 +202,26 @@ function baseRoutes({
       ) {
         signedIn = true;
         return json(authenticatedSession);
+      }
+      if (
+        url.pathname === "/api/v1/auth/register" &&
+        method === "POST"
+      ) {
+        const payload = body as {
+          username: string;
+          display_name: string;
+        };
+        signedIn = true;
+        return json({
+          ...authenticatedSession,
+          account: {
+            ...account,
+            id: "registered-member",
+            username: payload.username,
+            display_name: payload.display_name,
+            role: "member",
+          },
+        });
       }
       if (
         url.pathname === "/api/v1/auth/reauthenticate" &&
@@ -347,6 +375,8 @@ describe("PersonaOS Web", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    delete window.turnstile;
+    document.getElementById("cloudflare-turnstile-script")?.remove();
   });
 
   it("logs in before loading protected persona data", async () => {
@@ -404,6 +434,63 @@ describe("PersonaOS Web", () => {
     expect(
       calls.some((call) => call.path === "/api/v1/personas"),
     ).toBe(false);
+  });
+
+  it("registers a public visitor as a member after Turnstile", async () => {
+    window.turnstile = {
+      render: vi.fn((_container, options) => {
+        options.callback("turnstile-test-token");
+        return "widget-1";
+      }),
+      remove: vi.fn(),
+    };
+    const { calls } = baseRoutes({
+      authenticated: false,
+      registrationEnabled: true,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "登录工作区" });
+    await user.click(screen.getByRole("tab", { name: "注册" }));
+    expect(
+      await screen.findByRole("heading", { name: "注册普通成员" }),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText("显示名称"), "Public Visitor");
+    await user.type(screen.getByLabelText("用户名"), "public-visitor");
+    await user.type(
+      screen.getByLabelText("密码", { selector: "input" }),
+      "public-visitor-password",
+    );
+    await user.type(
+      screen.getByLabelText("确认密码"),
+      "public-visitor-password",
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "注册并登录" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        calls.some(
+          (call) =>
+            call.method === "POST" &&
+            call.path === "/api/v1/auth/register",
+        ),
+      ).toBe(true);
+    });
+    const registration = calls.find(
+      (call) => call.path === "/api/v1/auth/register",
+    );
+    expect(registration?.body).toEqual({
+      username: "public-visitor",
+      display_name: "Public Visitor",
+      password: "public-visitor-password",
+      turnstile_token: "turnstile-test-token",
+    });
+    expect(
+      screen.getByRole("heading", { name: /让记忆有来源/ }),
+    ).toBeInTheDocument();
   });
 
   it("rotates CSRF before an administrator creates an account", async () => {

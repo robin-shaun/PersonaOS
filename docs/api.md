@@ -11,8 +11,9 @@ Swagger UI 位于 `/docs`，运行时 schema 位于 `/openapi.json`；仓库同�
 
 ## 访问与信任模型
 
-除 `/health`、`/api/v1/auth/status` 和 `/api/v1/auth/login` 外，所有
-`/api/v1/*` 都需要有效的 `personaos_session` Cookie。服务端只保存 256-bit
+除 `/health`、`/api/v1/auth/status`、`/api/v1/auth/login` 和可选的
+`/api/v1/auth/register` 外，所有 `/api/v1/*` 都需要有效的
+`personaos_session` Cookie。服务端只保存 256-bit
 随机 Cookie 值的 SHA-256 摘要，并从会话账户派生 owner 和 actor；业务 payload
 不再接受可信 `user_id` 或 `requested_by`。跨账户资源统一表现为 `404`。
 
@@ -23,9 +24,10 @@ Swagger UI 位于 `/docs`，运行时 schema 位于 `/openapi.json`；仓库同�
 
 PostgreSQL 在应用层过滤之外强制 owner RLS，普通事务会切换到不可登录且不能
 绕过 RLS 的运行时角色；SQLite 不支持 RLS，只用于本机开发和相同的应用隔离
-测试。0.12 仍是回环地址上的本地账户系统，没有 MFA、自助恢复、集中限流、独立
-migration/runtime 登录凭据或公网生产部署基线，不要把它直接暴露到公网或
-不可信局域网。
+测试。可选公众注册只在 `PERSONA_COOKIE_SECURE=true` 且同时配置 Turnstile
+Site/Secret Key 时允许启动；应用执行服务端 Siteverify，并对登录/注册做单进程
+限流。公网部署还必须通过 TLS 反向隧道并在边缘集中限流，不能直接暴露 API。
+当前仍没有 MFA、自助恢复或经过独立审计的公网身份平台。
 
 调用人物端点时可以发送最多 100 个字符的 `X-Request-ID`。服务会把它写入相关
 审计事件，便于把用户操作和证据链关联起来；包含换行、制表符或过长的值会返回
@@ -81,6 +83,35 @@ curl -sS -X POST \
 再认证响应包含新的 `csrf_token`，调用方必须替换旧值，再由用户明确重试原高风险
 请求；服务不会自动执行它。
 
+### 可选公众注册
+
+首个管理员创建完成后，HTTPS 部署可以显式配置：
+
+~~~dotenv
+PERSONA_COOKIE_SECURE=true
+PERSONA_PUBLIC_REGISTRATION_ENABLED=true
+PERSONA_TURNSTILE_SITE_KEY=PUBLIC_SITE_KEY
+PERSONA_TURNSTILE_SECRET_KEY=PRIVATE_SECRET_KEY
+~~~
+
+`GET /api/v1/auth/status` 只返回公开 Site Key。浏览器把一次性 Turnstile token
+发送到注册接口，Secret Key 只在 API 进程内用于服务端验证：
+
+~~~json
+{
+  "username": "new-member",
+  "display_name": "New Member",
+  "password": "AT_LEAST_15_CHARACTERS",
+  "turnstile_token": "ONE_TIME_BROWSER_TOKEN"
+}
+~~~
+
+`POST /api/v1/auth/register` 只创建 `member`，不接受 `role` 等额外字段；成功后
+直接签发与登录相同的 Secure/HttpOnly/SameSite=Strict 会话。数据库为空时返回
+`409`，因此匿名注册永远不能完成管理员 bootstrap。重复用户名和密码策略错误使用
+同一 `409` 文案，降低账户枚举信息。Turnstile 验证失败返回 `400`，进程限流返回
+`429`。完整 Cloudflare Tunnel 顺序见 README。
+
 ## 错误与并发语义
 
 FastAPI 参数校验错误使用标准 `{"detail": [...]}` 响应。领域错误使用
@@ -99,6 +130,7 @@ FastAPI 参数校验错误使用标准 `{"detail": [...]}` 响应。领域错误
 | `413` | 人物导出超过配置的内存缓冲上限 |
 | `422` | schema 或领域约束不满足 |
 | `428` | 高风险动作要求近期再认证；不会自动重试原请求 |
+| `429` | 登录或公众注册超过当前进程的滑动窗口限制 |
 | `502` | 上游 GitHub/Hermes 失败，或回答 citation 未通过校验 |
 | `503` | 所需 GitHub App/Hermes 尚未配置或不可用 |
 
@@ -260,8 +292,9 @@ Blob object key。
 
 | 方法与路径 | 行为 |
 | --- | --- |
-| `GET /api/v1/auth/status` | 公开返回本地认证模式和是否需要首个管理员 |
+| `GET /api/v1/auth/status` | 公开返回认证模式、初始化状态和公开 Turnstile Site Key |
 | `POST /api/v1/auth/login` | 验证 Argon2id 密码并轮换已有 Cookie |
+| `POST /api/v1/auth/register` | 可选；Turnstile 验证后仅创建 member 并登录 |
 | `GET /api/v1/auth/session` | 返回可信账户、会话期限和 CSRF |
 | `POST /api/v1/auth/reauthenticate` | 验证当前密码并轮换 Cookie/CSRF |
 | `POST /api/v1/auth/logout` | 撤销当前会话 |

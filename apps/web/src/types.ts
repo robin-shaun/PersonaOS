@@ -18,10 +18,12 @@ export interface Health {
 }
 
 export interface AuthenticationStatus {
-  mode: "trusted_local_accounts";
+  mode: "trusted_local_accounts" | "public_registration";
   setup_required: boolean;
   cookie_secure: boolean;
   local_only: boolean;
+  registration_enabled: boolean;
+  turnstile_site_key: string | null;
 }
 
 export interface Account {

@@ -88,6 +88,7 @@ class AuthRepository:
         role: str,
         actor_id: str | None,
         request_id: str | None,
+        created_via: str | None = None,
     ) -> dict[str, Any]:
         now = utc_now()
         with self.database.session(system=True) as session:
@@ -137,7 +138,13 @@ class AuthRepository:
                 action="account.created",
                 outcome="succeeded",
                 subject_hash=None,
-                detail={"role": role, "created_via": "api" if actor_id else "cli"},
+                detail={
+                    "role": role,
+                    "created_via": (
+                        created_via
+                        or ("api" if actor_id is not None else "cli")
+                    ),
+                },
             )
             return _account_dict(account)
 

@@ -1081,6 +1081,49 @@ textarea::placeholder {
   gap: 15px;
 }
 
+.auth-mode-switch {
+  display: grid;
+  padding: 4px;
+  margin-top: 20px;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.auth-mode-switch button {
+  min-height: 40px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.auth-mode-switch button.is-active {
+  color: var(--forest);
+  background: var(--surface);
+  box-shadow: 0 1px 5px rgb(30 43 35 / 9%);
+}
+
+.turnstile-frame {
+  min-height: 88px;
+  overflow-x: auto;
+}
+
+.turnstile-frame small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.field-error {
+  margin: -8px 0 0;
+  color: var(--red);
+  font-size: 0.75rem;
+}
+
 .setup-command {
   padding: 15px;
   margin: 20px 0 12px;
@@ -2992,6 +3035,10 @@ textarea::placeholder {
 
   .auth-intro .logo-mark {
     margin-bottom: 20px;
+  }
+
+  .auth-card {
+    padding: 22px 18px;
   }
 
   .button,

@@ -97,6 +97,7 @@ export async function request<T>(
     const invalidSession =
       response.status === 401 &&
       path !== "/api/v1/auth/login" &&
+      path !== "/api/v1/auth/register" &&
       path !== "/api/v1/auth/reauthenticate";
     if (invalidSession) {
       csrfToken = "";
@@ -135,6 +136,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
+    csrfToken = result.csrf_token;
+    return result;
+  },
+
+  register: async (
+    username: string,
+    displayName: string,
+    password: string,
+    turnstileToken: string,
+  ) => {
+    const result = await request<AuthenticatedSession>(
+      "/api/v1/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          username,
+          display_name: displayName,
+          password,
+          turnstile_token: turnstileToken,
+        }),
+      },
+    );
     csrfToken = result.csrf_token;
     return result;
   },

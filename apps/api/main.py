@@ -37,6 +37,7 @@ from apps.api.schemas import (
     PreferenceReviewRequest,
     ProjectMaintenanceTaskCreate,
     ReauthenticationRequest,
+    RegistrationRequest,
     TaskCancellationRequest,
 )
 from core.bootstrap import Container, build_container
@@ -53,6 +54,7 @@ from core.security.authentication import (
     SessionPrincipal,
 )
 from core.security.data_policy import ModelDataPolicyError
+from core.security.public_auth import SlidingWindowRateLimiter, TurnstileVerifier
 from core.services.github_connections import GitHubAppNotConfiguredError
 from core.services.project_maintenance import (
     ProjectMaintenanceCommand,
@@ -73,9 +75,21 @@ def create_app(container: Container | None = None) -> FastAPI:
         ),
     )
     app.state.container = container
+    app.state.turnstile_verifier = TurnstileVerifier(
+        container.settings.persona_turnstile_secret_key
+    )
+    app.state.login_rate_limiter = SlidingWindowRateLimiter(
+        limit=20,
+        window_seconds=10 * 60,
+    )
+    app.state.registration_rate_limiter = SlidingWindowRateLimiter(
+        limit=5,
+        window_seconds=60 * 60,
+    )
 
     public_api_paths = {
         "/api/v1/auth/login",
+        "/api/v1/auth/register",
         "/api/v1/auth/status",
     }
 
@@ -89,6 +103,25 @@ def create_app(container: Container | None = None) -> FastAPI:
                 detail="X-Request-ID is invalid",
             )
         return request_id or None
+
+    def client_address(request: Request) -> str:
+        cloudflare_address = (
+            request.headers.get("CF-Connecting-IP") or ""
+        ).strip()
+        if cloudflare_address and len(cloudflare_address) <= 64:
+            return cloudflare_address
+        if request.client is not None:
+            return request.client.host
+        return "unknown"
+
+    def enforce_rate_limit(request: Request, limiter: SlidingWindowRateLimiter) -> None:
+        if limiter.allow(client_address(request)):
+            return
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many requests; try again later",
+            headers={"Retry-After": str(limiter.window_seconds)},
+        )
 
     def current_principal(request: Request) -> SessionPrincipal:
         principal = getattr(request.state, "principal", None)
@@ -283,7 +316,11 @@ def create_app(container: Container | None = None) -> FastAPI:
             ),
             "api_port": container.settings.api_port,
             "task_timeout_seconds": container.settings.worker_task_timeout_seconds,
-            "persona_identity_mode": "trusted_local_accounts",
+            "persona_identity_mode": (
+                "public_registration"
+                if container.settings.persona_public_registration_enabled
+                else "trusted_local_accounts"
+            ),
             "account_setup_required": container.authentication.setup_required(),
             "persona_blob_encryption": "AES-256-GCM",
             "persona_embedding_space_id": (
@@ -293,11 +330,24 @@ def create_app(container: Container | None = None) -> FastAPI:
 
     @app.get("/api/v1/auth/status")
     async def authentication_status() -> dict[str, Any]:
+        registration_enabled = (
+            container.settings.persona_public_registration_enabled
+        )
         return {
-            "mode": "trusted_local_accounts",
+            "mode": (
+                "public_registration"
+                if registration_enabled
+                else "trusted_local_accounts"
+            ),
             "setup_required": container.authentication.setup_required(),
             "cookie_secure": container.settings.persona_cookie_secure,
-            "local_only": True,
+            "local_only": not registration_enabled,
+            "registration_enabled": registration_enabled,
+            "turnstile_site_key": (
+                container.settings.persona_turnstile_site_key
+                if registration_enabled
+                else None
+            ),
         }
 
     @app.post("/api/v1/auth/login")
@@ -307,6 +357,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         response: Response,
     ) -> dict[str, Any]:
         validate_request_origin(request)
+        enforce_rate_limit(request, app.state.login_rate_limiter)
         try:
             grant = container.authentication.login(
                 username=payload.username,
@@ -319,6 +370,73 @@ def create_app(container: Container | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="invalid username or password",
+            ) from exc
+        set_session_cookie(response, grant)
+        return {
+            "account": grant.principal.account,
+            "session": {
+                "id": grant.principal.session_id,
+                "idle_expires_at": grant.principal.session[
+                    "idle_expires_at"
+                ].isoformat(),
+                "absolute_expires_at": grant.principal.session[
+                    "absolute_expires_at"
+                ].isoformat(),
+                "reauthenticated_at": grant.principal.session[
+                    "reauthenticated_at"
+                ].isoformat(),
+            },
+            "csrf_token": grant.csrf_token,
+            "reauthentication_window_seconds": (
+                container.authentication.reauthentication_seconds
+            ),
+        }
+
+    @app.post("/api/v1/auth/register")
+    async def register(
+        payload: RegistrationRequest,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        validate_request_origin(request)
+        if not container.settings.persona_public_registration_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="public registration is not enabled",
+            )
+        if container.authentication.setup_required():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="an administrator must be created first",
+            )
+        enforce_rate_limit(request, app.state.registration_rate_limiter)
+        verified = await app.state.turnstile_verifier.verify(
+            payload.turnstile_token,
+            remote_ip=client_address(request),
+        )
+        if not verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="human verification failed",
+            )
+        try:
+            container.authentication.register_member(
+                username=payload.username,
+                display_name=payload.display_name,
+                password=payload.password,
+                request_id=getattr(request.state, "request_id", None),
+            )
+            grant = container.authentication.login(
+                username=payload.username,
+                password=payload.password,
+                current_raw_token=request.cookies.get(SESSION_COOKIE_NAME),
+                request_id=getattr(request.state, "request_id", None),
+                user_agent=request.headers.get("User-Agent"),
+            )
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="registration could not be completed",
             ) from exc
         set_session_cookie(response, grant)
         return {
@@ -1410,6 +1528,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         public_paths = {
             "/health",
             "/api/v1/auth/login",
+            "/api/v1/auth/register",
             "/api/v1/auth/status",
         }
         unsafe_methods = {"post", "put", "patch", "delete"}

@@ -233,6 +233,13 @@ class LoginRequest(StrictRequest):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class RegistrationRequest(StrictRequest):
+    username: str = Field(min_length=3, max_length=32)
+    display_name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=15, max_length=1024)
+    turnstile_token: str = Field(min_length=1, max_length=2048)
+
+
 class ReauthenticationRequest(StrictRequest):
     password: str = Field(min_length=1, max_length=1024)
 

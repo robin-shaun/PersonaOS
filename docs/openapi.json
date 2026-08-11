@@ -570,6 +570,43 @@
         "title": "ReauthenticationRequest",
         "type": "object"
       },
+      "RegistrationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 1024,
+            "minLength": 15,
+            "title": "Password",
+            "type": "string"
+          },
+          "turnstile_token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Turnstile Token",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 32,
+            "minLength": 3,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "display_name",
+          "password",
+          "turnstile_token"
+        ],
+        "title": "RegistrationRequest",
+        "type": "object"
+      },
       "TaskCancellationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -877,6 +914,46 @@
           }
         ],
         "summary": "Reauthenticate"
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "register_api_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Api V1 Auth Register Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register"
       }
     },
     "/api/v1/auth/session": {

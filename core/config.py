@@ -42,6 +42,9 @@ class Settings:
     persona_max_sessions_per_account: int = 5
     persona_login_failure_limit: int = 5
     persona_login_lockout_seconds: int = 60
+    persona_public_registration_enabled: bool = False
+    persona_turnstile_site_key: str | None = None
+    persona_turnstile_secret_key: str | None = field(default=None, repr=False)
     persona_blob_dir: Path | None = None
     persona_blob_key: str | None = field(default=None, repr=False)
     persona_blob_key_path: Path | None = field(default=None, repr=False)
@@ -63,6 +66,21 @@ class Settings:
                 "PERSONA_REAUTHENTICATION_SECONDS must not exceed "
                 "PERSONA_SESSION_ABSOLUTE_SECONDS"
             )
+        if self.persona_public_registration_enabled:
+            if not self.persona_cookie_secure:
+                raise ValueError(
+                    "PERSONA_COOKIE_SECURE must be true when public registration "
+                    "is enabled"
+                )
+            if not (
+                self.persona_turnstile_site_key
+                and self.persona_turnstile_secret_key
+            ):
+                raise ValueError(
+                    "PERSONA_TURNSTILE_SITE_KEY and "
+                    "PERSONA_TURNSTILE_SECRET_KEY are required when public "
+                    "registration is enabled"
+                )
 
     @classmethod
     def from_env(cls, base_dir: Path | None = None) -> Settings:
@@ -216,6 +234,18 @@ class Settings:
                 minimum=1,
                 maximum=24 * 60 * 60,
             ),
+            persona_public_registration_enabled=_env_bool(
+                "PERSONA_PUBLIC_REGISTRATION_ENABLED",
+                default=False,
+            ),
+            persona_turnstile_site_key=(
+                os.getenv("PERSONA_TURNSTILE_SITE_KEY") or ""
+            ).strip()
+            or None,
+            persona_turnstile_secret_key=(
+                os.getenv("PERSONA_TURNSTILE_SECRET_KEY") or ""
+            ).strip()
+            or None,
             persona_blob_dir=_configured_path(
                 project_root,
                 os.getenv("PERSONA_BLOB_DIR"),

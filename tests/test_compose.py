@@ -43,4 +43,15 @@ def test_compose_is_local_first_and_runs_migrations() -> None:
     assert services["api"]["environment"]["PERSONA_AUTH_KEY_PATH"] == (
         "/app/var/persona/auth.key"
     )
-    assert services["api"]["environment"]["PERSONA_COOKIE_SECURE"] == "false"
+    assert services["api"]["environment"]["PERSONA_COOKIE_SECURE"] == (
+        "${PERSONA_COOKIE_SECURE:-false}"
+    )
+    assert services["api"]["environment"][
+        "PERSONA_PUBLIC_REGISTRATION_ENABLED"
+    ] == "${PERSONA_PUBLIC_REGISTRATION_ENABLED:-false}"
+    assert services["api"]["environment"]["PERSONA_TURNSTILE_SITE_KEY"] == (
+        "${PERSONA_TURNSTILE_SITE_KEY:-}"
+    )
+    assert services["api"]["environment"][
+        "PERSONA_TURNSTILE_SECRET_KEY"
+    ] == "${PERSONA_TURNSTILE_SECRET_KEY:-}"
