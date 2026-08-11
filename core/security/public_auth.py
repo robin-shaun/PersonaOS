@@ -64,11 +64,18 @@ class TurnstileVerifier:
 class SlidingWindowRateLimiter:
     """Small single-process guard; Cloudflare remains the distributed edge limit."""
 
-    def __init__(self, *, limit: int, window_seconds: int) -> None:
-        if limit < 1 or window_seconds < 1:
+    def __init__(
+        self,
+        *,
+        limit: int,
+        window_seconds: int,
+        max_keys: int = 10_000,
+    ) -> None:
+        if limit < 1 or window_seconds < 1 or max_keys < 1:
             raise ValueError("rate limiter values must be positive")
         self._limit = limit
         self._window_seconds = window_seconds
+        self._max_keys = max_keys
         self._attempts: dict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
 
@@ -80,6 +87,14 @@ class SlidingWindowRateLimiter:
         timestamp = time.monotonic() if now is None else now
         cutoff = timestamp - self._window_seconds
         with self._lock:
+            if key not in self._attempts and len(self._attempts) >= self._max_keys:
+                for candidate, candidate_attempts in list(self._attempts.items()):
+                    while candidate_attempts and candidate_attempts[0] <= cutoff:
+                        candidate_attempts.popleft()
+                    if not candidate_attempts:
+                        del self._attempts[candidate]
+                if len(self._attempts) >= self._max_keys:
+                    return False
             attempts = self._attempts[key]
             while attempts and attempts[0] <= cutoff:
                 attempts.popleft()

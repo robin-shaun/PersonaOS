@@ -117,6 +117,16 @@ def test_public_registration_configuration_and_rate_limiter(container) -> None:
     assert not limiter.allow("address", now=2)
     assert limiter.allow("address", now=11)
 
+    bounded = SlidingWindowRateLimiter(
+        limit=2,
+        window_seconds=10,
+        max_keys=2,
+    )
+    assert bounded.allow("first", now=0)
+    assert bounded.allow("second", now=0)
+    assert not bounded.allow("third", now=1)
+    assert bounded.allow("third", now=11)
+
 
 @pytest.mark.asyncio
 async def test_public_registration_creates_only_member_and_secure_session(
