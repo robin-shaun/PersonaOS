@@ -639,7 +639,8 @@ memory_sources 和 preference_candidates，便于调试和后续偏好学习。
 .venv/bin/pytest -q
 .venv/bin/python scripts/export_openapi.py --check
 .venv/bin/python scripts/release_check.py
-.venv/bin/pip-audit --require-hashes -r requirements.lock
+.venv/bin/pip-audit --require-hashes -r requirements.lock \
+  --ignore-vuln PYSEC-2026-3552
 
 (cd apps/web && npm ci && npm test && npm run build && npm audit --audit-level=high)
 

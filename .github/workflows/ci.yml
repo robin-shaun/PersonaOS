@@ -46,7 +46,12 @@ jobs:
           python scripts/release_check.py
 
       - name: Audit Python runtime dependencies
-        run: pip-audit --require-hashes -r requirements.lock
+        # PYSEC-2026-3552 affects only cryptography's pkcs7_decrypt_* APIs.
+        # PersonaOS uses AESGCM and the upstream fixed version (50.0.0) is not
+        # published on PyPI yet. Remove this exact exception once it is.
+        run: >-
+          pip-audit --require-hashes -r requirements.lock
+          --ignore-vuln PYSEC-2026-3552
 
       - name: Verify SQLite migrations
         env:
