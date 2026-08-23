@@ -8,7 +8,7 @@ RUN npm ci
 COPY apps/web/ ./
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.31.3-alpine3.24@sha256:18d67281256ded39ff65e010ae4f831be18f19356f83c60bc546492c7eb6dd23
+FROM nginxinc/nginx-unprivileged:1.31.4-alpine3.24@sha256:c3fed6436b61d2bf2201ec032c35c000871f7ed062dea5d586bc6bf4d0fdd140
 
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build --chown=101:101 /build/dist/ /usr/share/nginx/html/
