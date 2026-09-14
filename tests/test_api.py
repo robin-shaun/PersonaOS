@@ -9,6 +9,20 @@ from core.services.task_queue import TaskWorker
 
 
 @pytest.mark.asyncio
+async def test_namespaced_health_is_public_without_opening_private_apis(
+    container: Container,
+) -> None:
+    transport = httpx.ASGITransport(app=create_app(container))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        legacy = await client.get("/health")
+        namespaced = await client.get("/api/v1/health")
+        assert namespaced.status_code == 200
+        assert namespaced.json() == legacy.json()
+        assert namespaced.json()["status"] == "ok"
+        assert (await client.get("/api/v1/accounts")).status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_api_runs_task_and_accepts_approval(
     container: Container,
     authenticate_client,

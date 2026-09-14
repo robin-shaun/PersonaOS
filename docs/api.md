@@ -11,7 +11,7 @@ Swagger UI 位于 `/docs`，运行时 schema 位于 `/openapi.json`；仓库同�
 
 ## 访问与信任模型
 
-除 `/health`、`/api/v1/auth/status`、`/api/v1/auth/login` 和可选的
+除 `/health`（兼容别名 `/api/v1/health`）、`/api/v1/auth/status`、`/api/v1/auth/login` 和可选的
 `/api/v1/auth/register` 外，所有 `/api/v1/*` 都需要有效的
 `personaos_session` Cookie。服务端只保存 256-bit
 随机 Cookie 值的 SHA-256 摘要，并从会话账户派生 owner 和 actor；业务 payload

@@ -138,6 +138,16 @@ PERSONAOS_WEB_BIND_HOST=192.168.1.23 \
 和非敏感演示资料，不能做路由器端口转发或直接暴露公网；异地访问应使用带 TLS
 和访问控制的正式部署或安全隧道。
 
+### 同一 IP 下的 HTTP 页面浏览
+
+可在已有 HTTP 入口将 `/persona/` 转发到 Web 的 `/`，并将 `/assets/*` 与
+`/api/v1/*` 转发到 `127.0.0.1:18111`。Web 使用 `/api/v1/health` 检查运行状态，
+因此不会与同一 IP 下其他网站的 `/health` 冲突；原 `/health` 继续供容器使用。
+反向代理应保留原始 Host，并按实际连接设置 `X-Forwarded-Proto`。
+
+此方式用于页面浏览，不会自动完成管理员初始化或开启公众注册。当前 Secure
+Cookie 配置下，HTTP 页面不能建立登录会话；不要通过明文 HTTP 提交真实密码。
+
 ### 公网手机访问与公众注册（Cloudflare）
 
 可以使用 Cloudflare，但应使用有固定名称和域名的 **Named Tunnel**，不要把临时

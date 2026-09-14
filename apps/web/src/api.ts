@@ -120,7 +120,7 @@ export async function request<T>(
 }
 
 export const api = {
-  health: () => request<Health>("/health"),
+  health: () => request<Health>("/api/v1/health"),
 
   authenticationStatus: () =>
     request<AuthenticationStatus>("/api/v1/auth/status"),

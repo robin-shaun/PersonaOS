@@ -88,6 +88,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     )
 
     public_api_paths = {
+        "/api/v1/health",
         "/api/v1/auth/login",
         "/api/v1/auth/register",
         "/api/v1/auth/status",
@@ -300,6 +301,7 @@ def create_app(container: Container | None = None) -> FastAPI:
             content={"detail": str(exc)},
         )
 
+    @app.get("/api/v1/health", include_in_schema=False)
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {

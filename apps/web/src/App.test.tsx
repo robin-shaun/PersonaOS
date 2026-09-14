@@ -166,7 +166,7 @@ function baseRoutes({
         csrf: headers.get("X-CSRF-Token"),
       });
 
-      if (url.pathname === "/health") {
+      if (url.pathname === "/api/v1/health") {
         return json({
           status: "ok",
           version: "0.12.0",
