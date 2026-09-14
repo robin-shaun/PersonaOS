@@ -26,6 +26,7 @@
 - 跨账户人物、资料、记忆、检索、引用、任务、偏好、导出和删除统一返回 404；
 - schema 升级保留所有 0.11 owner，不把旧资料静默分配给首个账户；
 - Compose 持久化独立认证 key，OpenAPI 标注 Cookie 与 CSRF security scheme；
+- `cryptography` 升级到已修复 `PYSEC-2026-3552` 的 50.x，并恢复无例外依赖审计；
 - 版本统一升级到 0.12.0，路线图进入 M7 真实性分类与人物时间线。
 
 ### Security

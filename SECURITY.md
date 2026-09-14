@@ -71,14 +71,6 @@ README 使用 HTTPS Named Tunnel、Secure Cookie、Turnstile 和 Cloudflare 边�
 - 第三方 Skill 安装和不可信代码隔离尚未实现；
 - 外部模型、TTS、ASR 或数字人服务一旦启用，会形成新的数据处理方边界。
 
-## 临时上游漏洞例外
-
-截至 2026-08-11，`cryptography` 49.0.0 被报告存在 `PYSEC-2026-3552`
-（`GHSA-g6cj-pr64-35w5`），上游标记的修复版本 50.0.0 尚未发布到 PyPI。该问题只
-影响 `pkcs7_decrypt_der`、`pkcs7_decrypt_pem` 和 `pkcs7_decrypt_smime`；PersonaOS
-只使用 `AESGCM`，不调用这些接口。因此 CI 仅对这个精确编号做带注释的临时豁免，
-其他审计结果仍会阻断构建。50.0.0 可用后应升级锁文件并立即移除豁免。
-
 完整威胁边界和删除语义见 [架构文档](docs/architecture.md)、
 [ADR 0001](docs/adr/0001-memory-privacy-lifecycle.md) 与
 [ADR 0004](docs/adr/0004-trusted-local-accounts.md)。
